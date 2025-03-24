@@ -42,3 +42,4 @@ wheels/
 # Virtual environment
 venv/
 env/
+myenv/
