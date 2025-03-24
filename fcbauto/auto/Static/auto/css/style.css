@@ -1,0 +1,273 @@
+body {
+    background: linear-gradient(to bottom, #5ac6cf, #eaeaea);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .main-container {
+    background: #e0f7fa;
+    padding: 3rem;
+    border-radius: 20px;
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+    width: 95%;
+    max-width: 1000px;
+    transition: transform 0.3s ease;
+}
+
+.main-container img {
+  max-width: 100%; /* Make the image responsive */
+  height: 50px; /* Set a fixed height for the image */
+  width: auto; 
+  border-radius: 10px; /* Optional: add rounded corners */
+  top: -10px; /* Space from the top of the container */
+  left: -10px; /* Space from the left of the container */
+}
+
+  h2 {
+    color: #252a30;
+    text-align: center;
+    margin-bottom: 20px;
+    font-weight: bold;
+    font-size: 1.8rem;
+  }
+
+  .btn {
+    background-color: #ff5722; 
+    color: white; 
+    border: none; 
+    border-radius: 5px; 
+    padding: 10px 20px; 
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center; 
+  }
+
+  .upload-form {
+    text-align: center;
+  }
+
+  .download-section {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .btn:hover {
+    background-color: blue;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+  }
+
+
+  .alert {
+    text-align: center;
+    margin-top: 20px;
+  }
+/* Existing styles... */
+.container-fluid {
+  padding: 20px;
+}
+
+.hot-container {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* Excel-like tab styling
+.nav-tabs {
+  border-bottom: 1px solid #dee2e6;
+  background: #f8f9fa;
+  padding: 5px 5px 0 5px;
+}
+
+.nav-tabs .nav-link {
+  border: 1px solid #dee2e6;
+  border-bottom: none;
+  background: #e9ecef;
+  padding: 5px 15px;
+  margin-right: 3px;
+  font-size: 0.9rem;
+}
+
+.nav-tabs .nav-link.active {
+  background: white;
+  border-bottom: 1px solid white;
+  margin-bottom: -1px;
+}
+
+/* Ensure the table stays within viewport */
+.tab-content {
+  height: calc(100vh - 250px);
+  border: 1px solid #dee2e6;
+  border-top: none;
+  padding: 10px;
+  background: white;
+}
+
+.tab-pane {
+  height: 100%;
+} */
+
+/* Make sure Handsontable doesn't overflow */
+.handsontable {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* Medium devices (tablets, 768px and up) */
+@media (max-width: 768px) {
+  .main-container {
+    padding: 1.5rem;
+    width: 98%;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  .download-section {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .btn {
+    width: 100%;
+    margin-bottom: 10px;
+    justify-content: center;
+  }
+
+  .card-text.display-4 {
+    font-size: 2rem;
+  }
+
+  table.table {
+    font-size: 0.9rem;
+  }
+
+  .preview-buttons-container {
+    flex-direction: column;
+  }
+
+  .preview-buttons-container .btn {
+    margin: 10px 5px;
+    width: 80%;
+    max-width: 300px;
+  }
+}
+
+/* Small devices (landscape phones, 576px and up) */
+@media (max-width: 576px) {
+  .main-container {
+    padding: 1rem;
+    border-radius: 10px;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    margin-bottom: 15px;
+  }
+
+  .card-body {
+    padding: 1rem;
+  }
+
+  .card-text.display-4 {
+    font-size: 1.5rem;
+  }
+
+  table.table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .table thead {
+    font-size: 0.8rem;
+  }
+
+  .table tbody {
+    font-size: 0.8rem;
+  }
+
+  .main-container img {
+    height: 40px;
+  }
+}
+
+/* Extra small devices (portrait phones, less than 576px) */
+@media (max-width: 400px) {
+  .main-container {
+    padding: 0.5rem;
+  }
+
+  h2 {
+    font-size: 1.2rem;
+  }
+
+  .btn {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+  }
+
+  .card-title {
+    font-size: 1rem;
+  }
+
+  .card-text.display-4 {
+    font-size: 1.2rem;
+  }
+}
+
+/* Preview section button container */
+.preview-buttons-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 30px;
+}
+
+.preview-buttons-container .btn {
+    margin: 0 10px;
+    min-width: 150px;
+}
+
+
+/* Sheet selector styling: ensure it is centered */
+
+
+/* Table container styling: center the preview table */
+.table-responsive {
+  margin: 20px auto;
+  max-width: 100%; /* Ensures responsiveness */
+}
+
+/* Responsive adjustments for mobile devices */
+@media (max-width: 768px) {
+  #previewSection .button-container {
+    display: block;  /* Use block layout on mobile */
+  }
+
+  #previewSection .btn {
+    display: block;
+    width: 80%;
+    max-width: 300px;
+    margin: 10px auto;
+  }
+
+  #previewSection h3 {
+    margin-bottom: 20px;
+  }
+}
+
+#hotContainer {
+    width: 100%;
+    max-width: 1200px; /* or whatever maximum width you prefer */
+    margin: 0 auto;
+}
+
+
+

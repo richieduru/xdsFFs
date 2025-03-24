@@ -1,0 +1,131 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upload File</title>
+    <link rel="stylesheet" href="{% static 'auto/css/style.css' %}">
+    <link
+      rel="stylesheet"
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+    />
+  </head>
+  <body>
+    <div class="main-container">
+      <img src="{% static 'auto/images/FirstCentralAPPROVEDLogo.png' %}" alt="Image Description">
+      <h2>Excel File Upload</h2>
+      <form
+        method="post"
+        enctype="multipart/form-data"
+        class="upload-form"
+        id="uploadForm"
+        {% if success_message %}style="display: none;"{% endif %}
+      >
+        {% csrf_token %} {{ form.as_p }}
+        <button type="submit" class="btn btn-primary">Upload File</button>
+      </form>
+
+      {% if success_message %}
+      <div class="alert alert-success mt-3">
+        {{ success_message }}
+                <!-- Processing Statistics -->
+                <div class="mb-4">
+                  <h5>Processing Details:</h5>
+                  <table class="table table-sm table-bordered">
+                    <thead class="thead-light">
+                      <tr>
+                        <th>Sheet</th>
+                        <th>Initial Columns</th>
+                        <th>Initial Records</th>
+                        <th>Valid Records</th>
+                        <th>Processed Columns</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for stat in processing_stats %}
+                      <tr>
+                        <td>{{ stat.sheet_name }}</td>
+                        <td>{{ stat.initial_columns }}</td>
+                        <td>{{ stat.initial_records }}</td>
+                        <td>{{ stat.valid_records }}</td>
+                        <td>{{ stat.processed_columns }}</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+        
+                <!-- Merged Records Summary -->
+                <div class="mb-4">
+                  <h5>Merged Records:</h5>
+                  <div class="row">
+                    <div class="col-md-6">
+                      <div class="card bg-light mb-3">
+                        <div class="card-body">
+                          <h5 class="card-title">Individual Borrowers</h5>
+                          <p class="card-text display-4">{{ total_individual }}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-md-6">
+                      <div class="card bg-light mb-3">
+                        <div class="card-body">
+                          <h5 class="card-title">Corporate Borrowers</h5>
+                          <p class="card-text display-4">{{ total_corporate }}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+        <div class="download-section">
+          {% if individual_download_url %}
+          <a
+            href="{{ individual_download_url }}"
+            class="btn btn-success"
+            download
+          >
+            <i class="fas fa-download"></i> Individual Borrowers
+          </a>
+          {% endif %} {% if corporate_download_url %}
+          <a href="{{ corporate_download_url }}" class="btn btn-info" download>
+            <i class="fas fa-download"></i> Corporate Borrowers
+          </a>
+          {% endif %} {% if full_download_url %}
+          <a href="{{ full_download_url }}" class="btn btn-secondary" download>
+            <i class="fas fa-download"></i> Full Processed File
+          </a>
+          {% endif %}
+        </div>
+          {% comment %} TXT GENERATION {% endcomment %}
+          <div class="download-section">
+          {% if individual_txt_url %}
+          <a href="{{ individual_txt_url }}" class="btn btn-outline-success" download>
+            <i class="fas fa-file-alt"></i> Individual (TXT)
+          </a>
+          {% endif %}
+
+          {% if corporate_txt_url %}
+          <a href="{{ corporate_txt_url }}" class="btn btn-outline-info" download>
+            <i class="fas fa-file-alt"></i> Corporate (TXT)
+          </a>
+          {% endif %}
+
+          {% if full_txt_url %}
+          <a href="{{ full_txt_url }}" class="btn btn-outline-secondary" download>
+            <i class="fas fa-file-alt"></i> Full Processed (TXT)
+          </a>
+          {% endif %}
+        </div>
+        
+        <a href="{% url 'upload_file' %}" class="btn btn-secondary mt-3">Upload New File</a>
+      </div>
+      {% endif %} {% if error_message %}
+      <div class="alert alert-danger mt-3">{{ error_message }}</div>
+      {% endif %}
+    </div>
+
+  </body>
+</html>
