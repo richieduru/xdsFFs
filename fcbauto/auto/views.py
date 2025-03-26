@@ -1198,7 +1198,8 @@ def clear_previous_info_columns(df):
         'PREVIOUSNAME',
         'PREVIOUSCUSTOMERID',
         'PREVIOUSBRANCHCODE',
-        'BUSINESSSECTOR'
+        'BUSINESSSECTOR',
+        'PICTUREFILEPATH'
     ]
     
     print("\n=== CLEARING PREVIOUS INFO COLUMNS ===")
