@@ -587,9 +587,15 @@ def process_nationality(df):
             print(f"? FAILED to process column {column}: {column_e}")
             print(traceback.format_exc())
     return df
+
+    
 def remove_spaces(text):
     """Remove spaces from the input string."""
-    return text.replace(" ", "")
+    if text is None:
+        return ""
+    return str(text).replace(" ", "")
+
+    
 def process_special_characters(df):
     """Remove special characters from all columns except specified ones, preserving '&' in address columns"""
     if df is None or df.empty:
@@ -2552,9 +2558,11 @@ def upload_file(request):
                 })
 
             except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
                 return render(request, 'upload.html', {
                     'form': form,
-                    'error_message': f'Error processing file: {str(e)}'
+                    'error_message': f'Error Details:\n{error_details}'
                 })
             finally:
                 # Clean up the uploaded file
