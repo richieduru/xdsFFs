@@ -588,7 +588,7 @@ def process_nationality(df):
             print(traceback.format_exc())
     return df
 
-    
+
 def remove_spaces(text):
     """Remove spaces from the input string."""
     if text is None:
@@ -2564,6 +2564,10 @@ def upload_file(request):
                     'form': form,
                     'error_message': f'Error Details:\n{error_details}'
                 })
+                #  return render(request, 'upload.html', {
+                #     'form': form,
+                #     'error_message': f'Error processing file: {str(e)}'
+                # })
             finally:
                 # Clean up the uploaded file
                 if os.path.exists(file_path):
