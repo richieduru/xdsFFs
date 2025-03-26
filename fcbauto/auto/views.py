@@ -699,7 +699,7 @@ def process_special_characters(df):
 
     # Now handle specific columns to remove spaces
     # ------------------------------------------------# take notr of this.-------------------------------------------------------
-    for col in ['CUSTOMERID', 'TAXID', 'OTHERID']:
+    for col in ['CUSTOMERID', 'TAXID', 'OTHERID','LEGALCHALLENGESTATUS','LOANSECURITYSTATUS']:
         if col in df.columns:
             df[col] = df[col].apply(remove_spaces)
 
