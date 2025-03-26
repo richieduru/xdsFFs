@@ -826,9 +826,9 @@ Currency_dict = {"NGN": ["naira","n", "ng","ngn"],
 
                 
 AccountStatus_dict = {
-    '001': ['001', 'open', '01', '1', 'active'],
+    '001': ['001', 'open','opened', '01', '1', 'active'],
     '002': ['002', 'closed', '02', '2'],
-    '003': ['003', 'written off', 'written0ff','writtenoff', '03', '3']
+    '003': ['003', 'written off', 'written0ff','writtenoff', '03', '3','write off']
 }
 
 ConsuToComm={
@@ -887,7 +887,7 @@ ConsuToComm={
     'PREVIOUSNAME':['PREVIOUSNAME'],
     'PREVIOUSCUSTOMERID':['PREVIOUSCUSTOMERID'],
     'PREVIOUSBRANCHCODE':['PREVIOUSBRANCHCODE'],
-    #'NUMBEROFDIRECTORS':[''],
+
     'PRINCIPALOFFICER1SURNAME':['INDIVIDUALGUARANTORSURNAME'],
     'PRINCIPALOFFICER1FIRSTNAME':['INDIVIDUALGUARANTORFIRSTNAME'],
     'PRINCIPALOFFICER1MIDDLENAME':['INDIVIDUALGUARNTORMIDDLENAME'],
@@ -1006,7 +1006,8 @@ Classification_dict = {'001':['001', 'performing','1','01','perform',"performing
                        '004':['004', 'doubtful','04','4'],
                        '005':['005','lost','05','5']
 }
-Collateraltype_dict = {'001':['001','realestatelandbuilding','01','1','realestate','land','building'],
+Collateraltype_dict = {
+                      '001':['001','realestatelandbuilding','01','1','realestate','land','building'],
                       '002':['002','Automobile','02','2'],
                       '003':['003','plantequipment','plantandequipment','equipment','plant','03','3'],
                       '004':['004','naturalreserves','natural','reserves','04','4'],
@@ -1015,5 +1016,6 @@ Collateraltype_dict = {'001':['001','realestatelandbuilding','01','1','realestat
                       '007':['007','cash','07','7'],
                       '008':['008','personalguarantees','personalguarantee','personal','guarantees','08','8'],
                       '009':['009','postdatedcheques','postcheques','datedcheques','cheques','09','9'],
-                      '010':['010','dormicilliation','10']}
+                      '010':['010','dormicilliation','10']
+                      }
 

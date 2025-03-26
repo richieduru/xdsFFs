@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render
 from .forms import ExcelUploadForm
-from .mappings import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,sec_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n  
@@ -1542,9 +1542,13 @@ def try_convert_to_float(x):
     if pd.isna(x) or x == '':
         return ''
     
-    # Convert to string if not already
+    # Convert to string if not already and strip leading/trailing spaces
     x = str(x).strip()
     
+    # Remove specific special characters and leading/extra spaces
+    x = re.sub(r'[-₦]', '', x)  # Remove specific special characters
+    x = re.sub(r'\s+', ' ', x)  # Replace multiple spaces with a single space
+
     # First, check if the string is fully numeric (with a single decimal point)
     if re.match(r'^[0-9]+(\.[0-9]+)?$', x):
         try:
@@ -1555,7 +1559,6 @@ def try_convert_to_float(x):
     
     try:
         # Remove any non-numeric characters except decimal point
-        # This will strip out alphabets, plus/minus signs, currency symbols, commas
         cleaned_value = re.sub(r'[^0-9.]', '', x)
         
         # If nothing remains after cleaning, return original value
@@ -1574,7 +1577,6 @@ def try_convert_to_float(x):
     
     except (ValueError, TypeError) as e:
         # If conversion fails, return the cleaned value with commas removed
-        # This ensures no commas in the output
         return cleaned_value if 'cleaned_value' in locals() else x
 
 def process_numeric_columns(df):
@@ -1969,7 +1971,7 @@ def split_commercial_entities(indi):
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
     "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
-    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",  "WA", "WMPCS",
+    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",  "WA", "WMPCS","sociaty","co operative",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
     "associate", "associates", "association", "authority", "auto", "automobile", "bakery", "bank", "bar", "beautyspa",
@@ -1999,7 +2001,7 @@ def split_commercial_entities(indi):
     "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",
     "worldwide", "youth", "youths"
 ]
     # Create a DataFrame to store commercial entities/
@@ -2133,7 +2135,7 @@ def merge_dataframes(processed_sheets):
     "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",
     "worldwide", "youth", "youths"
 ]
     # Extract DataFrames from processed sheets
@@ -2421,17 +2423,17 @@ def upload_file(request):
                     cleaned_df = process_loan_tenor(cleaned_df)
                     cleaned_df = clear_previous_info_columns(cleaned_df)
                     cleaned_df = process_numeric_columns(cleaned_df)
-                    # cleaned_df = fill_data_column(cleaned_df)
-                    # cleaned_df = fill_depend_column(cleaned_df)
-                    # cleaned_df = process_identity_numbers(cleaned_df)
-                    # cleaned_df = process_passport_number(cleaned_df)
-                    # cleaned_df = process_business_id(cleaned_df)
-                    # cleaned_df = process_bvn_number(cleaned_df)
-                    # cleaned_df = process_occu(cleaned_df)
-                    # cleaned_df = process_DriversLicense(cleaned_df)
-                    # cleaned_df = process_otherid(cleaned_df)
+                    cleaned_df = fill_data_column(cleaned_df)
+                    cleaned_df = fill_depend_column(cleaned_df)
+                    cleaned_df = process_identity_numbers(cleaned_df)
+                    cleaned_df = process_passport_number(cleaned_df)
+                    cleaned_df = process_business_id(cleaned_df)
+                    cleaned_df = process_bvn_number(cleaned_df)
+                    cleaned_df = process_occu(cleaned_df)
+                    cleaned_df = process_DriversLicense(cleaned_df)
+                    cleaned_df = process_otherid(cleaned_df)
 
-   #---------------------------------------------------------ABANDONED FOR NOOW------------------------------------------                 
+   #---------------------------------------------------------ABANDONED FOR NOW------------------------------------------                 
                     # cleaned_df = process_business_sector(cleaned_df)
     #--------------------------------------------------------------------------------------------------------------------                
                     for stat in processing_stats:
