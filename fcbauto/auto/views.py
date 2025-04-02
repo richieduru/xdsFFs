@@ -205,7 +205,7 @@ def convert_date(date_string):
         serial_number = float(date_string)
         
         # Check if the serial number is within the valid Excel date range
-        if serial_number < 0 or serial_number > 2958465:
+        if serial_number <= 0 or serial_number > 2958465:
             return None  # Invalid range for Excel date serial numbers
         
         # Excel serial date base is 1899-12-30
