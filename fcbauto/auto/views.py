@@ -1712,19 +1712,49 @@ def merge_individual_borrowers(consu, credit, guar):
         print("Consu shape:", consu_cleaned.shape)
         print("Credit shape:", credit.shape)
         return pd.DataFrame()
+  
 
+#   --------------------------------------------------TEST THIS MERGE IF ITS OKAY____-----------------------------------------------------
     # Merge with guarantor information
+    merge_attempted = False
     try:
+        print("Attempting primary merge with ACCOUNTNUMBER")
         indi = pd.merge(
             indi,
             guar,
             left_on='ACCOUNTNUMBER',
             right_on='CUSTOMERSACCOUNTNUMBER',
-            how='left'
+            how='left',
+            indicator=True
         )
-        print(f"Guarantor merge successful. Final shape: {indi.shape}")
+        merge_attempted = True
+        print(f"Guarantor merge on ACCOUNTNUMBER successful. Shape: {indi.shape}")
+        print("Merge indicator counts:")
+        print(indi['_merge'].value_counts())
+        indi = indi.drop(columns=['_merge'])
     except Exception as e:
-        print(f"Guarantor merge failed: {str(e)}")
+        print(f"Primary guarantor merge failed: {str(e)}")
+
+    # Fallback merge if primary merge failed or didn't find matches
+    if not merge_attempted or indi['_merge'].eq('left_only').all():
+        print("Attempting fallback merge with CUSTOMERSACCOUNTNUMBER to CUSTOMERID")
+        try:
+            temp_merge = pd.merge(
+                indi,
+                guar,
+                left_on='CUSTOMERID',
+                right_on='CUSTOMERSACCOUNTNUMBER',
+                how='left',
+                indicator=True
+            )
+            print("Fallback merge analysis:")
+            print(temp_merge['_merge'].value_counts())
+            
+            # Keep all rows but update with guarantor info where available
+            indi = temp_merge.drop(columns=['_merge'])
+            print(f"Fallback guarantor merge completed. Final shape: {indi.shape}")
+        except Exception as e:
+            print(f"Fallback guarantor merge failed: {str(e)}")
     # else:
     #     print("No guarantor information available")
     return indi
