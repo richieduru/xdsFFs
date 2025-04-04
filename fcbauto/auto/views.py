@@ -1392,8 +1392,10 @@ def process_phone_columns(df):
                     # Split on any non-digit character and take the first non-empty number
                     df[col] = df[col].apply(lambda x: next((num.strip() for num in re.split(r'\D+', x) if num.strip()), ''))
                     
-                    # Pad with zeros if less than 11 digits
-                    df[col] = df[col].apply(lambda x: x.zfill(11) if x and len(x) < 11 else x)
+                     # Pad with zeros if less than 11 digits
+                    # df[col] = df[col].apply(lambda x: x.zfill(11) if x and len(x) < 11 else x)
+                    # Pad with zeros at the BEGINNING if less than 11 digits
+                    df[col] = df[col].apply(lambda x: x.rjust(11, '0') if x and len(x) < 11 else x)
                     
                     # New validation: Check if number > 11 digits and doesn't start with 234
                     df[col] = df[col].apply(lambda x: '' if len(x) > 11 and not x.startswith('234') else x)
