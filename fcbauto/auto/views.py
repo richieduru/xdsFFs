@@ -1385,19 +1385,18 @@ def process_phone_columns(df):
                 if col in df.columns:
                     print(f"Processing phone number column: {col}")
                     df[col] = df[col].astype(str)
-                    # Keep only the first number before any comma
-                    df[col] = df[col].apply(lambda x: x.split(',')[0] if ',' in x else x)
-                    # Remove any non-numeric characters
-                    df[col] = df[col].apply(lambda x: ''.join(filter(str.isdigit, str(x))) if pd.notna(x) else '')
+                    
+                    # First extract only digits from the string, keeping spaces to separate numbers
+                    df[col] = df[col].apply(lambda x: ''.join(char if char.isdigit() or char in [',', ';', '/', '|', '-', ' '] else ' ' for char in str(x)))
+                    
+                    # Split on any non-digit character and take the first non-empty number
+                    df[col] = df[col].apply(lambda x: next((num.strip() for num in re.split(r'\D+', x) if num.strip()), ''))
+                    
                     # Pad with zeros if less than 11 digits
                     df[col] = df[col].apply(lambda x: x.zfill(11) if x and len(x) < 11 else x)
-                     # New validation: Check if number > 11 digits and doesn't start with 234
+                    
+                    # New validation: Check if number > 11 digits and doesn't start with 234
                     df[col] = df[col].apply(lambda x: '' if len(x) > 11 and not x.startswith('234') else x)
-
-                    # New validation: Remove numbers not starting with 07, 08, or 09
-                    # df[col] = df[col].apply(lambda x: x if (x.startswith(('07', '08', '09')) or (x.startswith('234') and len(x) == 13)) else '')
-                    # New validation: Check for first two digits being the same
-                    # df[col] = df[col].apply(lambda x: '' if x and len(x) >= 2 and x[0] == x[1] else x)
 
                     # Remove numbers that are more than 14 characters
                     df[col] = df[col].apply(lambda x: x if len(x) <= 13 else '')
