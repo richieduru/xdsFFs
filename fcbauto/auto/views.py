@@ -1720,7 +1720,7 @@ def merge_individual_borrowers(consu, credit, guar):
     merge_attempted = False
     try:
         print("Attempting primary merge with ACCOUNTNUMBER")
-        indi = pd.merge(
+        temp_merge = pd.merge(
             indi,
             guar,
             left_on='ACCOUNTNUMBER',
@@ -1729,35 +1729,50 @@ def merge_individual_borrowers(consu, credit, guar):
             indicator=True
         )
         merge_attempted = True
-        print(f"Guarantor merge on ACCOUNTNUMBER successful. Shape: {indi.shape}")
+        print(f"Guarantor merge on ACCOUNTNUMBER shape: {temp_merge.shape}")
         print("Merge indicator counts:")
-        print(indi['_merge'].value_counts())
-        indi = indi.drop(columns=['_merge'])
-    except Exception as e:
-        print(f"Primary guarantor merge failed: {str(e)}")
-
-    # Fallback merge if primary merge failed or didn't find matches
-    if not merge_attempted or indi['_merge'].eq('left_only').all():
-        print("Attempting fallback merge with CUSTOMERSACCOUNTNUMBER to CUSTOMERID")
-        try:
-            temp_merge = pd.merge(
-                indi,
+        print(temp_merge['_merge'].value_counts())
+        
+        # Check if we need fallback merge
+        if temp_merge['_merge'].eq('left_only').all():
+            print("No matches found in primary merge, attempting fallback merge with credit CUSTOMERID")
+            # First merge guarantor with credit on CUSTOMERID
+            guar_credit_merge = pd.merge(
                 guar,
-                left_on='CUSTOMERID',
-                right_on='CUSTOMERSACCOUNTNUMBER',
-                how='left',
-                indicator=True
+                credit[['CUSTOMERID', 'ACCOUNTNUMBER']],  # Only take necessary columns from credit
+                left_on='CUSTOMERSACCOUNTNUMBER',
+                right_on='CUSTOMERID',
+                how='inner'  # Only keep matches between guarantor and credit
             )
-            print("Fallback merge analysis:")
-            print(temp_merge['_merge'].value_counts())
             
-            # Keep all rows but update with guarantor info where available
+            if not guar_credit_merge.empty:
+                # Then merge this result with indi
+                fallback_merge = pd.merge(
+                    indi,
+                    guar_credit_merge,
+                    on='ACCOUNTNUMBER',  # Match on ACCOUNTNUMBER from credit
+                    how='left',
+                    indicator=True
+                )
+                print("Fallback merge analysis:")
+                print(fallback_merge['_merge'].value_counts())
+                # Drop the extra CUSTOMERID column from credit if it exists
+                columns_to_drop = ['_merge', 'CUSTOMERID_y'] if 'CUSTOMERID_y' in fallback_merge.columns else ['_merge']
+                indi = fallback_merge.drop(columns=columns_to_drop)
+                print(f"Fallback guarantor merge completed. Final shape: {indi.shape}")
+            else:
+                print("No matches found in fallback merge")
+                indi = temp_merge.drop(columns=['_merge'])
+        else:
             indi = temp_merge.drop(columns=['_merge'])
-            print(f"Fallback guarantor merge completed. Final shape: {indi.shape}")
-        except Exception as e:
-            print(f"Fallback guarantor merge failed: {str(e)}")
-    # else:
-    #     print("No guarantor information available")
+            print(f"Primary guarantor merge successful. Final shape: {indi.shape}")
+            
+    except Exception as e:
+        print(f"Guarantor merge failed: {str(e)}")
+        print("Continuing with original data")
+        if '_merge' in indi.columns:
+            indi = indi.drop(columns=['_merge'])
+        
     return indi
 
 def merge_corporate_borrowers(comm, credit, prin):
