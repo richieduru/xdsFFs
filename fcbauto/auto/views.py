@@ -722,11 +722,14 @@ def process_special_characters(df):
             try:
                 # Convert to lowercase and filter valid emails
                 df[col] = df[col].str.lower()
-                # df[col] = df[col].apply(
-                #     lambda x: x if pd.notnull(x) and 
-                #     (x.endswith('@gmail.com') or x.endswith('@yahoo.com')) or x.endswith('.co.uk')) orx.endswith('.com')) 
-                #     else ''
-                # )
+                df[col] = df[col].apply(
+                    lambda x: x if pd.notnull(x) and (
+                        x.endswith('@gmail.com') or 
+                        x.endswith('@yahoo.com')) or 
+                        # x.endswith('.co.uk')) or 
+                        x.endswith('.com') 
+                else ''
+                )
             except Exception as e:
                 print(f"Error processing email column {col}: {e}")
     
@@ -743,7 +746,10 @@ def process_passport_number(df):
     pd.DataFrame: The updated DataFrame with valid Passport Numbers retained.
     """
     # List of Passport Number columns to process
-    passport_columns = ['PASSPORTNUMBER']  # You can add more columns to this list if needed
+    passport_columns = ['PASSPORTNUMBER',
+                        'PRINCIPALOFFICER1PASSPORTNUMBER',
+                        'PRINCIPALOFFICER2PASSPORTNUMBER',
+                        'GUARNATORINTLPASSPORTNUMBER']  # You can add more columns to this list if needed
     
     for column_name in passport_columns:
         if column_name in df.columns:
@@ -755,8 +761,8 @@ def process_passport_number(df):
                 # Check if the value is numeric
                 if passport_str.isdigit():
                     return ''  # Remove if purely numeric
-                # Discard if the cleaned ID is not exactly 11 characters
-                if len(passport_str) != 11:
+                # Discard if the cleaned ID is not exactly 11 or 10 characters
+                if len(passport_str) not in [10,11]:
                     return ''
                 return passport_str  # Keep alphanumeric values
 
@@ -785,6 +791,7 @@ def process_identity_numbers(df):
         'NATIONALIDENTITYNUMBER',  
         'PRINCIPALOFFICER1NATIONALID',
         'PRINCIPALOFFICER2NATIONALID',
+        'GUARANTORNATIONALIDNUMBER',
     ]
     
     for column_name in identity_columns:
@@ -827,7 +834,8 @@ def process_DriversLicense(df):
     # List of Pendicomid columns to process
     dLicense = [ 'DRIVERSLICENSENUMBER',
             'PRINCIPALOFFICER1DRIVERSLISCENCENUMBER',
-            'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER']  # You can add more columns to this list if needed
+            'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER'
+            'GUARANTORNATIONALIDNUMBER']  # You can add more columns to this list if needed
     
     for column_name in dLicense:
         if column_name in df.columns:
@@ -838,7 +846,7 @@ def process_DriversLicense(df):
                 value_str = re.sub(r'[^a-zA-Z0-9]', '', value_str)
                 
                 # Discard if the cleaned value is not exactly 11 characters
-                if len(value_str) != 11:
+                if len(value_str) not in [10, 11]:
                     return ''
                 
                 # Check that the value starts with three letters (case insensitive) immediately followed by a digit.
@@ -1772,7 +1780,8 @@ def merge_individual_borrowers(consu, credit, guar):
         print("Continuing with original data")
         if '_merge' in indi.columns:
             indi = indi.drop(columns=['_merge'])
-        
+    indi.drop(columns=['NUMBEROFDIRECTORS'], inplace=True)
+   
     return indi
 
 def merge_corporate_borrowers(comm, credit, prin):
@@ -1970,7 +1979,7 @@ def split_commercial_entities(indi):
     """
     # More comprehensive commercial keywords
     commercial_keywords = [
-    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG", "LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
+    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
     "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
     "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",
     "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",
@@ -1982,7 +1991,7 @@ def split_commercial_entities(indi):
     "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
     "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
     "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
-    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION", "COUNCIL", "COY", "CRADLES", "CREATIONS", "CTV",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
     "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
     "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
     "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
@@ -2004,7 +2013,7 @@ def split_commercial_entities(indi):
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
     "MULTITECH", "MUSICIANS", "Markert", "Marketers", "N U T",  "NATIONAL", "NETWORK", "NIGERIA", "NOODLES",
-    "NORTH", "NURSERY", "NUT", "OCEAN", "OFFICE", "OFFSHORE", "OFPHYSICAL", "OGSG", "OPINION", "ORG",'cup',
+    "NORTH", "NURSERY", "NUT", "OCEAN",  "OFFSHORE", "OFPHYSICAL", "OGSG", "OPINION", "ORG",'cup',
     "ORGANISATION", "ORGANIZATION", "ORIENTAL", "OUTLOOK", "OVERHEAD", "PAINT", "PARTNER", "PARTS", "PAVILION", "PENSION",
      "PERFORMANCE", "PERFORMING", "PETROCHEMICALS", "PETROLEUM", "PETROLSEAL", "PETROSERVE", "PFA", "PHARMA", "PHARMACEUTICAL",
     "PHYSIOTHERAPY", "PILLAR", "PLACE", "PLASTIC", "PLAZA", "PLC", "POINT", "POLITICAL", "POLYMALT", "POLYMER",
@@ -2043,7 +2052,7 @@ def split_commercial_entities(indi):
     "innovations", "institution", "integrated", "interior", "international", "investment", "ipml", "judicial", "kiddies", "laundry",
     "league", "leasing", "legacy", "license", "lifestyle", "lightning", "limited", "linen", "link", "liquidation",
     "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
-    "markets", "media", "medical", "medicare", "meeting", "memorial", "merchant", "merchants", "microfinance", "ministries",
+    "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
     "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
     "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
     "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
@@ -2116,7 +2125,7 @@ def merge_dataframes(processed_sheets):
     "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
     "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
     "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
-    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION", "COUNCIL", "COY", "CRADLES", "CREATIONS", "CTV",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
     "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
     "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
     "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
@@ -2138,7 +2147,7 @@ def merge_dataframes(processed_sheets):
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
     "MULTITECH", "MUSICIANS", "Markert", "Marketers", "N U T",  "NATIONAL", "NETWORK", "NIGERIA", "NOODLES",
-    "NORTH", "NURSERY", "NUT", "OCEAN", "OFFICE", "OFFSHORE", "OFPHYSICAL", "OGSG", "OPINION", "ORG",'cup',
+    "NORTH", "NURSERY", "NUT", "OCEAN",  "OFFSHORE", "OFPHYSICAL", "OGSG", "OPINION", "ORG",'cup',
     "ORGANISATION", "ORGANIZATION", "ORIENTAL", "OUTLOOK", "OVERHEAD", "PAINT", "PARTNER", "PARTS", "PAVILION", "PENSION",
      "PERFORMANCE", "PERFORMING", "PETROCHEMICALS", "PETROLEUM", "PETROLSEAL", "PETROSERVE", "PFA", "PHARMA", "PHARMACEUTICAL",
     "PHYSIOTHERAPY", "PILLAR", "PLACE", "PLASTIC", "PLAZA", "PLC", "POINT", "POLITICAL", "POLYMALT", "POLYMER",
@@ -2177,7 +2186,7 @@ def merge_dataframes(processed_sheets):
     "innovations", "institution", "integrated", "interior", "international", "investment", "ipml", "judicial", "kiddies", "laundry",
     "league", "leasing", "legacy", "license", "lifestyle", "lightning", "limited", "linen", "link", "liquidation",
     "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
-    "markets", "media", "medical", "medicare", "meeting", "memorial", "merchant", "merchants", "microfinance", "ministries",
+    "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
     "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
     "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
     "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
