@@ -146,7 +146,7 @@ prin_mapping = {
         'PRINCIPALOFFICER2PRIMARYADDRESSLINE1': ['principal officer2 primary address line1','principalofficer2primaryaddressline1','primaryaddressline12','primary address line2','primaryaddressline2','primaryaddressline11','PRINCIPALOFFICER2PRIMARYADDRESSLINE1','P2PRIMARY ADDRESS LINE 1','P_PRIMARY ADDRESS LINE 1','P_ PRIMARY ADDRESS LINE 1','PRINCIPAL OFFICER PRIMARY ADDRESS LINE 1','PRINCIPAL OFFICER2 PRIMARY ADDRESS LINE1','primaryaddress2line1','primary address 2 line1'],
         'PRINCIPALOFFICER2PRIMARYADDRESSLINE2': ['principalofficer2 primary address line21','principalofficer2primaryaddressline2','primaryaddressline13','primaryaddressline14','principalofficer2primaryaddressline21','primary address line21','primaryaddressline21','PRINCIPALOFFICER2PRIMARYADDRESSLINE2','P2PRIMARY ADDRESS LINE 2','P_PRIMARY ADDRESS LINE 2','P_ PRIMARY ADDRESS LINE 2','PRINCIPAL OFFICER PRIMARY ADDRESS LINE 2','PRINCIPAL OFFICER2 PRIMARY ADDRESS LINE2','primaryaddress2line2'],
         'PRINCIPALOFFICER2CITY': ['citylga1','city1','principal officer2 city lga','principalofficer2citylga', 'principal officer2 city','principalofficer2city','principalofficer2city1', 'city1', 'PRINCIPALOFFICER2CITY','P2CITY','P_CITY','CITY','PRINCIPAL OFFICER2 CITY','LGA'],
-        'PRINCIPALOFFICER2STATE': ['state1','principal officer2 state','principal officer2 state1','principalofficer2state','principalofficer2state1','state 1','P2STATE', 'STATE1_2', 'STATE11', 'P_CITY','PRINCIPALOFFICER2STATE'],
+        'PRINCIPALOFFICER2STATE': ['state1','principal officer2 state','principal officer2 state1','principalofficer2state','principalofficer2state1','state 1','P2STATE', 'STATE1_2', 'STATE11', 'P_CITY','PRINCIPALOFFICER2STATE','state2'],
         'PRINCIPALOFFICER2COUNTRY': ['country1','principal officer2 country','principalofficer2country','principal officer2 country1','principalofficer2country1','country','PRINCIPALOFFICER2COUNTRY','P2COUNTRY','P_COUNTRY','PRINCIPAL OFFICER2 COUNTRY','country2','country.1'],
         'PRINCIPALOFFICER2NATIONALID': [ 'nationalid1', 'principal officer2 national id','principalofficer2nationalid','principalofficer2nationalid1', 'nationalid2',  'national id1', 'PRINCIPALOFFICER2NATIONALID', 'P2NATIONAL ID','DIRECTOR_2_NATIONAL_ID_NUMBER','P_NATIONAL ID','NATIONAL ID', 'PRINCIPAL OFFICER2 NATIONAL ID'],
         'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER': ['principal officer2 drivers license no','driversliscenceno','principalofficer2driverslicenseno','principalofficer2driverslicenseno1','driverslicenseno1','drivers license no1','PRINCIPALOFFICER2DRIVERSLISCENCENUMBER','Drivers License Number 2','P2DRIVERS LISCENCE NO','DIRECTOR_2_DRVS_LICENCE_NUMBER','DRIVERS LICENSE NO','PRINCIPAL OFFICER2 DRIVERS LICENSE NO','driverslicensenumber2'],
@@ -825,8 +825,8 @@ Currency_dict = {"NGN": ["naira","n", "ng","ngn"],
                  "YER": ["yer"],
                  "ZMW": ["zmw"]}
 AccountStatus_dict = {
-    'Open': ['001', 'open', '01', '1', 'active'],
-    'Closed': ['002', 'closed', '02', '2'],
+    'Open': ['001', 'open', '01', '1','opened', 'active'],
+    'Closed': ['002', 'closed','close', '02', '2'],
     'Writtenoff': ['003', 'written off', 'written0ff', '03', '3']
 }
 Loan_dict = {'Commercial Overdraft': ['commercialoverdraft', '1', '01', '001', 'CommercialOverdraft'],
@@ -977,7 +977,7 @@ ConsuToComm={
     'PREVIOUSNAME':['PREVIOUSNAME'],
     'PREVIOUSCUSTOMERID':['PREVIOUSCUSTOMERID'],
     'PREVIOUSBRANCHCODE':['PREVIOUSBRANCHCODE'],
-    'NUMBEROFDIRECTORS' : ['NUMBEROFDIRECTORS'],
+    'NUMBEROFDIRECTORS' : [''],
     'PRINCIPALOFFICER1SURNAME':['INDIVIDUALGUARANTORSURNAME'],
     'PRINCIPALOFFICER1FIRSTNAME':['INDIVIDUALGUARANTORFIRSTNAME'],
     'PRINCIPALOFFICER1MIDDLENAME':['INDIVIDUALGUARNTORMIDDLENAME'],

@@ -822,12 +822,14 @@ Currency_dict = {"NGN": ["naira","n", "ng","ngn"],
                  "VEF": ["vef"],
                  "VND": ["vnd"],
                  "YER": ["yer"],
-                 "ZMW": ["zmw"]}
+                 "ZMW": ["zmw"]
+                 
+}
 
                 
 AccountStatus_dict = {
     '001': ['001', 'open','opened', '01', '1', 'active'],
-    '002': ['002', 'closed', '02', '2'],
+    '002': ['002', 'closed','close', '02', '2'],
     '003': ['003', 'written off', 'written0ff','writtenoff', '03', '3','write off']
 }
 

@@ -534,13 +534,9 @@ def process_nationality(df):
         'EMPLOYERCOUNTRY',
         'SECONDARYADDRESSCOUNTRY',
         'BUSINESSOFFICEADDRESSCOUNTRY',
-        'REGISTEREDADDRESSCOUNTRY',
-        'COUNTRYOFINCORPORATION',
-        'CORPORATECOUNTRY',
         'PRINCIPALOFFICER1COUNTRY',
         'PRINCIPALOFFICER2COUNTRY',
-        'GUARANTORSPRIMARYCOUNTRY',
-        'GUARANTORSSECONDARYCOUNTRY'
+        'GUARANTORPRIMARYADDRESSCOUNTRY',
     ]
     
     def clean_country_value(value):
@@ -660,18 +656,6 @@ def process_special_characters(df):
         'PRINCIPALOFFICER1CITY',
         'PRINCIPALOFFICER2CITY',
         'PRIMARYADDRESSCITY',
-        'PRIMARYADDRESSSTATE',
-        'SECONDARYADDRESSSTATE',
-        'BUSINESSOFFICEADDRESSSTATE',
-        'GUARANTORPRIMARYADDRESSSTATE',
-        'PRINCIPALOFFICER1STATE',
-        'PRINCIPALOFFICER2STATE',
-        'PRIMARYADDRESSCOUNTRY',
-        'SECONDARYADDRESSCOUNTRY',
-        'BUSINESSOFFICEADDRESSCOUNTRY',
-        'GUARANTORPRIMARYADDRESSCOUNTRY',
-        'PRINCIPALOFFICER1COUNTRY',
-        'PRINCIPALOFFICER2COUNTRY',
     ]
 
     # Find processable columns (those not in excluded list)
@@ -686,11 +670,6 @@ def process_special_characters(df):
                     # Keep '&' in address columns
                     df[column] = df[column].apply(
                         lambda x: re.sub(r'[^a-zA-Z0-9&]', ' ', str(x)) if pd.notnull(x) else x
-                    )
-                elif column == 'COLLATERALDETAILS':
-                    # Remove numeric characters from COLLATERAL DETAILS
-                    df[column] = df[column].apply(
-                        lambda x: re.sub(r'\d+', '', str(x)).strip() if pd.notnull(x) else x
                     )
                 else:
                     # Remove special characters except '&' for other columns
@@ -834,8 +813,8 @@ def process_DriversLicense(df):
     # List of Pendicomid columns to process
     dLicense = [ 'DRIVERSLICENSENUMBER',
             'PRINCIPALOFFICER1DRIVERSLISCENCENUMBER',
-            'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER'
-            'GUARANTORNATIONALIDNUMBER']  # You can add more columns to this list if needed
+            'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER',
+            'GUARANTORDRIVERSLICENCENUMBER']  # You can add more columns to this list if needed
     
     for column_name in dLicense:
         if column_name in df.columns:
@@ -946,7 +925,10 @@ def process_otherid(df):
     
     # List of Other Identity Number columns to process
     otherid_columns = [
-       'OTHERID'
+       'OTHERID',
+       'PRINCIPALOFFICER1OTHERID',
+       'PRINCIPALOFFICER2OTHERID',
+       'GUARANTOROTHERID'
     ]
     
     for column_name in otherid_columns:
@@ -2033,7 +2015,7 @@ def split_commercial_entities(indi):
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
     "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
-    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",  "WA", "WMPCS","sociaty","co operative",
+    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS", "WMPCS","sociaty","co operative",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
     "associate", "associates", "association", "authority", "auto", "automobile", "bakery", "bank", "bar", "beautyspa",
@@ -2167,7 +2149,7 @@ def merge_dataframes(processed_sheets):
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
     "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
-    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",  "WA", "WMPCS",
+    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",   "WMPCS",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
     "associate", "associates", "association", "authority", "auto", "automobile", "bakery", "bank", "bar", "beautyspa",
