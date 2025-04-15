@@ -8,10 +8,10 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render
 from .forms import ExcelUploadForm
-from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm
+from .mappings import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm,consumer_merged,commercial_merged
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
-from word2number import w2n  
+from word2number import w2n
 from datetime import datetime
 import traceback
 import json
@@ -46,6 +46,23 @@ def ensure_all_sheets_exist(xds):
     print("\n=== SHEET PROCESSING REPORT ===")
     print("Checking for required sheets...")
     
+    # First check if we have merged sheets
+    has_merged_sheets = False
+    for original_name in xds.keys():
+        cleaned_name = clean_sheet_name(original_name)
+        if cleaned_name in ['consumermerged', 'commercialmerged']:
+            has_merged_sheets = True
+            print(f"? Found merged sheet: {original_name}")
+            processed_sheets[cleaned_name] = xds[original_name]
+            existing_sheets.append(original_name)
+    
+    # If we have merged sheets, skip generating missing sheets
+    if has_merged_sheets:
+        print("\n=== MERGED SHEETS DETECTED ===")
+        print("Skipping generation of missing sheets as merged sheets are present")
+        return processed_sheets
+    
+    # Regular sheet processing if no merged sheets found
     for sheet_name, mapping in expected_sheets.items():
         # Clean the sheet name for comparison
         cleaned_name = clean_sheet_name(sheet_name)
@@ -2093,7 +2110,45 @@ def merge_dataframes(processed_sheets):
     Returns:
         tuple: (Individual borrowers DataFrame, Corporate borrowers DataFrame)
     """
+    # Check if we have merged sheets
+    if 'consumermerged' in processed_sheets or 'commercialmerged' in processed_sheets:
+        print("\n=== PROCESSING MERGED SHEETS ===")
+        indi = processed_sheets.get('consumermerged', pd.DataFrame())
+        corpo = processed_sheets.get('commercialmerged', pd.DataFrame())
+        
+        # Apply null value cleaning
+        indi = indi.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
+        corpo = corpo.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
+        
+        print("\n=== MERGED SHEET DATA (Before Split) ===")
+        print("Individual records:", len(indi))
+        print("Corporate records:", len(corpo))
 
+        # --- Added Processing for Merged Sheets ---
+        # Split commercial entities from the consumer_merged data
+        if not indi.empty:
+            print("\nSplitting commercial entities from consumer_merged data...")
+            indi, corpo2 = split_commercial_entities(indi)
+            print(f"  - Individual records after split: {len(indi)}")
+            print(f"  - Commercial entities extracted: {len(corpo2)}")
+
+            # Rename and concatenate if commercial entities were found
+            if not corpo2.empty:
+                print("\nRenaming columns for extracted commercial entities...")
+                corpo2 = rename_columns(corpo2, ConsuToComm.copy())
+                
+                print("\nConcatenating extracted commercial entities with corporate data...")
+                corpo = pd.concat([corpo, corpo2], ignore_index=True)
+                print(f"  - Total corporate records after concatenation: {len(corpo)}")
+        # --- End Added Processing ---
+                
+        print("\n=== FINAL MERGED SHEET DATA ===")
+        print("Final Individual records:", len(indi))
+        print("Final Corporate records:", len(corpo))
+        
+        return indi, corpo
+
+    # Regular processing for non-merged sheets
     commercial_keywords = [
     "CREDIT", "GVL", "LOA", "POL", "SON", "NIG", "LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
     "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
@@ -2182,6 +2237,7 @@ def merge_dataframes(processed_sheets):
     "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",
     "worldwide", "youth", "youths"
 ]
+    
     # Extract DataFrames from processed sheets
     consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
     comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
@@ -2192,7 +2248,7 @@ def merge_dataframes(processed_sheets):
     indi = merge_individual_borrowers(consu, credit, guar)
     corpo = merge_corporate_borrowers(comm, credit, prin)
 
-        # Print merged corporate borrowers
+    # Print merged corporate borrowers
     print("\n=== MERGED CORPORATE BORROWERS ===")
     print(corpo.head()) 
 
@@ -2202,7 +2258,6 @@ def merge_dataframes(processed_sheets):
     #Step 3: Split commercial entities from individual borrowers
     indi, corpo2 = split_commercial_entities(indi)
 
-
     print("\n=== SHEET DATA AFTER MERGING ===")
     print("Number of rows:", len(indi))
     print("First few rows:")
@@ -2210,7 +2265,7 @@ def merge_dataframes(processed_sheets):
 
     print("Number of rows:", len(corpo))
     print("First few rows:")
-    print(corpo.head())    # Debug prints
+    print(corpo.head())
     print("Original corporate borrowers:", len(corpo))
     print("Commercial entities to add:", len(corpo2))
     
@@ -2218,7 +2273,6 @@ def merge_dataframes(processed_sheets):
     print("First few rows:")
     print(corpo2.head())
     print("================================")
-
 
     # Step 4: Rename commercial entities before combining
     if not corpo2.empty:
@@ -2239,8 +2293,6 @@ def merge_dataframes(processed_sheets):
         print("Columns in final corpo:", corpo.columns)
         print("First few rows after addition:")
         print(corpo.head())
-        
-
 
         # Additional check to verify commercial entities were added
         commercial_entities_in_corpo = corpo[
@@ -2431,6 +2483,10 @@ def upload_file(request):
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, credit_mapping)
                     elif cleaned_name == 'guarantorsinformation':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, guar_mapping)
+                    elif cleaned_name == 'consumermerged':
+                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consumer_merged)
+                    elif cleaned_name == 'commercialmerged':
+                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, commercial_merged)
 
                     for stat in processing_stats:
                         if stat['sheet_name'] == sheet_name:
