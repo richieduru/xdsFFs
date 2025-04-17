@@ -1148,7 +1148,7 @@ Loan_dict = {'001': ['commercialoverdraft', '1', '01', '001', 'CommercialOverdra
                 '005': ['commercialrentfacility', '5', '05', '005'],
                 '006': ['commerciallandpurchasefinancing', '6', '06', '006'],
                 '007': ['commercialbusinessautoloan', 'commercialautoloan', 'businessautoloan', '7', '07', '007'],
-                '008': ['commercialbusinessequipmentassetleasingfinancing', 'businessequipmentasset', '8', '08', '008'],
+                '008': ['commercialbusinessequipmentassetleasingfinancing', 'commercialbusinessequipmentassetleasingfinancin','businessequipmentasset', '8', '08', '008'],
                 '009': ['commercialbusinessfixedtermloan', 'commercialfixedtermloan', 'businessfixedtermloan', '9', '09', '009'],
                 '010': ['foreigndenominatedcommercialloan', '10', '010'],
                 '011': ['commercialinvestmentloan', '11', '011'],

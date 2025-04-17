@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render
 from .forms import ExcelUploadForm
-from .mappings import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm,consumer_merged,commercial_merged
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm,consumer_merged,commercial_merged
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n
@@ -1245,34 +1245,39 @@ def process_account_status(df):
             print(f"Unique values in {col} after processing:", df[col].unique())
     
     return df
+
+
 def exact_map_loan(loan_name):
-    loan_name_lower = loan_name.lower()
-
-    # Iterate through the Loan_dict and look for an exact match
+    # Clean the input
+    loan_name_clean = re.sub(r'[^a-zA-Z0-9]', '', str(loan_name)).lower()
+    # Clean and compare each dictionary value
     for loan_code, names in Loan_dict.items():
-        if loan_name_lower in [name.lower() for name in names]:
-            return loan_code
-
-    # Return None if no exact match is found
+        for name in names:
+            name_clean = re.sub(r'[^a-zA-Z0-9]', '', str(name)).lower()
+            if loan_name_clean == name_clean:
+                return loan_code
     return None
 
 def process_loan_type(df):
-    """Process business sector fields in the DataFrame"""
-    # Define the business sector columns to look for
+    """Process loan type fields in the DataFrame"""
+    # Define the loan type columns to look for
     loan_columns = [
         'FACILITYTYPE',
         # Add any other relevant column names that may appear
     ]
     
-    # Iterate through the list of potential business sector columns
+    # Iterate through the list of potential loan type columns
     for col in loan_columns:
         if col in df.columns:
-            # Clean the business sector values
-            df[col] = df[col].apply(lambda x: x.lower() if isinstance(x, str) else x)
-            df[col] = df[col].apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', x) if isinstance(x, str) else x)
+            print(f"Processing loan type column: {col}")
+            # Let exact_map_loan handle all the cleaning
             df[col] = df[col].apply(exact_map_loan)
+            # Print unique values after processing for debugging
+            print(f"Unique values in {col} after processing:", df[col].unique())
     
     return df
+
+
 def map_currency(value):
     """Maps currency values to standardized format."""
     if pd.isna(value) or value is None:
@@ -1631,8 +1636,8 @@ def trim_strings_to_59(df):
     """
     # Define the trimming function
     def trim_string(s):
-        if isinstance(s, str) and len(s) > 59:
-            return s[:58]  # Trim to 58 characters as requested
+        if isinstance(s, str) and len(s) > 61:
+            return s[:60]  # Trim to 58 characters as requested
         return s
     
     # Apply the function to all elements in the DataFrame
@@ -1640,7 +1645,7 @@ def trim_strings_to_59(df):
     df = df.applymap(trim_string)
     print("String trimming completed")
     
-    return df
+    # return df
 
 def merge_individual_borrowers(consu, credit, guar):
     """Merge individual borrower DataFrames"""
