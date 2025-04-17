@@ -1043,7 +1043,7 @@ Loan_dict = {
                  'Commercial rent facility': ['commercialrentfacility', '5', '05', '005'],
                  'Commercial Land purchase financing': ['commerciallandpurchasefinancing', '6', '06', '006'],
                  'Commercial/Business Auto Loan': ['commercialbusinessautoloan','commercialautoloan','businessautoloan', '7', '07', '007'],
-                 'Commercial/Business equipment asset/leasing/financing': ['commercialbusinessequipmentassetleasingfinancing', 'businessequipmentasset','8', '08', '008','CommercialBusinessequipmentassetleasingfinancin'],
+                 'Commercial/Business equipment asset/leasing/financing': ['commercialbusinessequipmentassetleasingfinancing', 'businessequipmentasset','8', '08', '008'],
                  'Commercial/Business fixed term loan': ['commercialbusinessfixedtermloan','commercialfixedtermloan','businessfixedtermloan', '9', '09', '009'],
                  'Foreign-denominated commercial loan': ['foreigndenominatedcommercialloan', '10', '010'],
                  'Commercial investment loan': ['commercialinvestmentloan', '11', '011'],
