@@ -1255,7 +1255,7 @@ def exact_map_loan(loan_name):
         for name in names:
             name_clean = re.sub(r'[^a-zA-Z0-9]', '', str(name)).lower()
             if loan_name_clean == name_clean:
-                return loan_code
+                return loan_code       
     return None
 
 def process_loan_type(df):
@@ -1265,16 +1265,11 @@ def process_loan_type(df):
         'FACILITYTYPE',
         # Add any other relevant column names that may appear
     ]
-    
     # Iterate through the list of potential loan type columns
     for col in loan_columns:
         if col in df.columns:
             print(f"Processing loan type column: {col}")
-            # Let exact_map_loan handle all the cleaning
-            df[col] = df[col].apply(exact_map_loan)
-            # Print unique values after processing for debugging
-            print(f"Unique values in {col} after processing:", df[col].unique())
-    
+            df[col] = df[col].apply(exact_map_loan)   
     return df
 
 
@@ -1623,29 +1618,6 @@ def process_numeric_columns(df):
             print(df[col].head())
     
     return df
-
-def trim_strings_to_59(df):
-    """
-    Trim all string values in the DataFrame to 59 characters maximum
-    
-    Args:
-        df (pd.DataFrame): Input DataFrame
-        
-    Returns:
-        pd.DataFrame: DataFrame with all string values trimmed to 59 characters
-    """
-    # Define the trimming function
-    def trim_string(s):
-        if isinstance(s, str) and len(s) > 61:
-            return s[:60]  # Trim to 58 characters as requested
-        return s
-    
-    # Apply the function to all elements in the DataFrame
-    print("\n=== TRIMMING STRING VALUES TO 59 CHARACTERS ===")
-    df = df.applymap(trim_string)
-    print("String trimming completed")
-    
-    # return df
 
 def merge_individual_borrowers(consu, credit, guar):
     """Merge individual borrower DataFrames"""
@@ -2377,26 +2349,17 @@ def modify_middle_names(df):
     return df
 
 def trim_strings_to_59(df):
-    """
-    Trim all string values in the DataFrame to 59 characters maximum
-    
-    Args:
-        df (pd.DataFrame): Input DataFrame
-        
-    Returns:
-        pd.DataFrame: DataFrame with all string values trimmed to 59 characters
-    """
+
     # Define the trimming function
     def trim_string(s):
-        if isinstance(s, str) and len(s) > 59:
-            return s[:58]  # Trim to 58 characters as requested
+        if isinstance(s, str) and len(s) > 60:
+            return s[:59]  # Trim to 58 characters as requested
         return s
     
     # Apply the function to all elements in the DataFrame
     print("\n=== TRIMMING STRING VALUES TO 59 CHARACTERS ===")
     df = df.applymap(trim_string)
     print("String trimming completed")
-    
     return df
 
 def upload_file(request):
@@ -2464,13 +2427,8 @@ def upload_file(request):
                     cleaned_name = clean_sheet_name(sheet_name)
                     # Process sheet
                     cleaned_df = sheet_data.copy()
-                    for column in cleaned_df.columns:
-                        if cleaned_df[column].dtype == object:
-                            cleaned_df[column] = cleaned_df[column].apply(
-                                lambda x: str(x)[:52] if isinstance(x, str) else x
-                            )
                     cleaned_df.replace('N/A', '', inplace=True)
-# Fix column cleaning sequence
+                    # Fix column cleaning sequence
                     cleaned_df.columns = [
                         str(col).upper().strip()  # Ensure column names are strings first
                         for col in cleaned_df.columns
@@ -2537,6 +2495,7 @@ def upload_file(request):
                     cleaned_df = process_occu(cleaned_df)
                     cleaned_df = process_DriversLicense(cleaned_df)
                     cleaned_df = process_otherid(cleaned_df)
+                    cleaned_df = trim_strings_to_59(cleaned_df)
 
    #---------------------------------------------------------ABANDONED FOR NOW------------------------------------------                 
                     # cleaned_df = process_business_sector(cleaned_df)
@@ -2560,8 +2519,8 @@ def upload_file(request):
                 corpo = remove_duplicates(corpo)
 
                 # Trim strings to 59 characters
-                indi = trim_strings_to_59(indi)
-                corpo = trim_strings_to_59(corpo)
+                # indi = trim_strings_to_59(indi)
+                # corpo = trim_strings_to_59(corpo)
 
                 total_individual_records = len(indi) if not indi.empty else 0
                 total_corporate_records = len(corpo) if not corpo.empty else 0
