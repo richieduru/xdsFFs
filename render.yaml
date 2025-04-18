@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: fcbauto
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn fcbauto.wsgi --log-file -"
