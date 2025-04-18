@@ -4,4 +4,4 @@ services:
     env: python
     plan: free
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn --chdir fcbauto fcbauto.wsgi --log-file -"
+    startCommand: "gunicorn --chdir fcbauto fcbauto.wsgi --log-file
