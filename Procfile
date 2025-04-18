@@ -1,1 +1,1 @@
-web: gunicorn fcbauto.wsgi --log-file -
+web: gunicorn fcbauto.fcbauto.wsgi --log-file -
