@@ -1186,49 +1186,25 @@ def process_occu(df):
 #     return df
 
 
+def normalize(s):
+    return re.sub(r'[^A-Za-z0-9]', '', str(s).lower())
+
 def map_accountStatus(value):
-    """Maps account status values to standardized format."""
     if pd.isna(value) or value is None:
         return None
-    
-    # Convert to string and clean
-    value = str(value).lower()
-    value = re.sub(r'[^a-zA-Z0-9]', '', value)
-    
-    for category, values in AccountStatus_dict.items():
-        # Convert dictionary values to lowercase and remove special characters for comparison
-        dict_values = [str(v).lower().replace(r'[^a-zA-Z0-9]', '') for v in values]
-        if value in dict_values:
+    val = normalize(value)
+    for category, variants in AccountStatus_dict.items():
+        cleaned = [normalize(v) for v in variants]
+        if val in cleaned:
             return category
-    return None  # Return None if no match is found
+    return None
 
-def clear_previous_info_columns(df):
-    """
-    Clear the contents of previous information columns while keeping headers
-    """
-    columns_to_clear = [
-        'PREVIOUSACCOUNTNUMBER',
-        'PREVIOUSNAME',
-        'PREVIOUSCUSTOMERID',
-        'PREVIOUSBRANCHCODE',
-        'BUSINESSSECTOR',
-        'PICTUREFILEPATH'
-    ]
-    
-    print("\n=== CLEARING PREVIOUS INFO COLUMNS ===")
-    for col in columns_to_clear:
-        if col in df.columns:
-            df[col] = ''
-    print("Previous info columns cleared")  
-    return df
 
 def process_account_status(df):
     """Process account status fields in the DataFrame."""
     # Define the account status columns to look for
     status_columns = [
         'ACCOUNTSTATUS',
-        'STATUS', 
-
     ]
 
     # Iterate through the list of potential account status columns
@@ -1346,6 +1322,7 @@ def process_collateral_type(df):
             df[col] = df[col].apply(map_collateraltype)
     
     return df
+
 def map_classification(value):
     """Maps classification values to standardized format."""
     if pd.isna(value) or value is None:
@@ -1617,6 +1594,26 @@ def process_numeric_columns(df):
             print(f"Sample values in {col} after processing:")
             print(df[col].head())
     
+    return df
+
+def clear_previous_info_columns(df):
+    """
+    Clear the contents of previous information columns while keeping headers
+    """
+    columns_to_clear = [
+        'PREVIOUSACCOUNTNUMBER',
+        'PREVIOUSNAME',
+        'PREVIOUSCUSTOMERID',
+        'PREVIOUSBRANCHCODE',
+        'BUSINESSSECTOR',
+        'PICTUREFILEPATH'
+    ]
+    
+    print("\n=== CLEARING PREVIOUS INFO COLUMNS ===")
+    for col in columns_to_clear:
+        if col in df.columns:
+            df[col] = ''
+    print("Previous info columns cleared")  
     return df
 
 def merge_individual_borrowers(consu, credit, guar):
