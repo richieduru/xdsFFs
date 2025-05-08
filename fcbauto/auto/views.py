@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render
 from .forms import ExcelUploadForm
-from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,ConsuToComm,consumer_merged,commercial_merged
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,consumer_merged,commercial_merged,CommToConsu
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n
@@ -194,7 +194,7 @@ def convert_date(date_string):
         return None
 
     # Define common missing value representations
-    missing_values = ["", "None", "NaN", "null", "N/A", "n/a", "na", "NA", "#N/A", "?", "missing"]
+    missing_values = ["", "None", "NaN", "null", "N/A", "n/a", "na", "NA", "#N/A", "?", "missing",'N.A']
     
     # Check if the cell is a missing value
     if isinstance(date_string, str) and date_string.strip() in missing_values:
@@ -345,6 +345,23 @@ def remove_special_chars(text):
     
     return text.strip()
 
+def clean_name_preserving_special_chars(text):
+    """Clean names while preserving valid name-specific special characters"""
+    if not text:
+        return ''
+    
+    # Convert to string if not already
+    text = str(text)
+    # Preserve apostrophes and hyphens that are between letters (like in "O'Connor" or "Jean-Pierre")
+    text = re.sub(r"([^a-zA-Z])'([^a-zA-Z])|^'|'$", ' ', text)  # Remove standalone apostrophes
+    text = re.sub(r"([^a-zA-Z])-([^a-zA-Z])|^-|-$", ' ', text)  # Remove standalone hyphens
+    # Remove other special characters but keep spaces
+    text = re.sub(r'[^a-zA-Z\s\'\-]', '', text)
+    # Replace multiple spaces with single space and strip
+    text = ' '.join(text.split())
+    
+    return text.strip()
+
 def process_names(df):
     """Process names before column mapping"""
     if df is None or df.empty:
@@ -372,9 +389,9 @@ def process_names(df):
             # Print after initial cleaning
             print("After initial cleaning:", df[name_columns].head())
             
-            # Remove titles and special characters
+            # Remove titles and clean names while preserving special characters
             for col in name_columns:
-                df[col] = df[col].apply(remove_titles).apply(remove_special_chars)
+                df[col] = df[col].apply(remove_titles).apply(clean_name_preserving_special_chars)
             
             # Combine non-empty name components
             def combine_names(row):
@@ -414,7 +431,7 @@ def process_names(df):
             for col in name_columns:
                 if col in df.columns:
                     df[col] = df[col].apply(lambda x: '' if x is None or (isinstance(x, float) and pd.isna(x)) else str(x).strip())
-                    df[col] = df[col].apply(remove_titles).apply(remove_special_chars)
+                    df[col] = df[col].apply(remove_titles).apply(clean_name_preserving_special_chars)
     
     return df
 
@@ -651,6 +668,15 @@ def process_special_characters(df):
         'OVERDUEAMOUNT',
         'LASTPAYMENTAMOUNT',
         'ACCOUNTSTATUSDATE',
+        'SURNAME',
+        'FIRSTNAME',
+        'MIDDLENAME',
+        'INDIVIDUALGUARANTORSURNAME',
+        'INDIVIDUALGUARANTORFIRSTNAME',
+        'INDIVIDUALGUARANTORMIDDLENAME',
+        'PRINCIPALOFFICERSURNAME',
+        'PRINCIPALOFFICERFIRSTNAME',
+        'PRINCIPALOFFICERMIDDLENAME'
     ]
 
     # List of columns that should preserve '&'
@@ -673,6 +699,7 @@ def process_special_characters(df):
         'PRINCIPALOFFICER1CITY',
         'PRINCIPALOFFICER2CITY',
         'PRIMARYADDRESSCITY',
+        'COLLATERALDETAILS'
     ]
 
     # Find processable columns (those not in excluded list)
@@ -689,7 +716,6 @@ def process_special_characters(df):
                         lambda x: re.sub(r'[^a-zA-Z0-9&]', ' ', str(x)) if pd.notnull(x) else x
                     )
                 else:
-                    # Remove special characters except '&' for other columns
                     df[column] = df[column].apply(
                         lambda x: re.sub(r'[^a-zA-Z0-9]', ' ', str(x)) if pd.notnull(x) else x
                     )
@@ -758,7 +784,7 @@ def process_passport_number(df):
                 if passport_str.isdigit():
                     return ''  # Remove if purely numeric
                 # Discard if the cleaned ID is not exactly 11 or 10 characters
-                if len(passport_str) not in [10,11]:
+                if len(passport_str) not in [9,10,11]:
                     return ''
                 return passport_str  # Keep alphanumeric values
 
@@ -771,9 +797,11 @@ def process_identity_numbers(df):
     Cleans the National Identity Number columns based on specified criteria.
     
     Updated Criteria:
-    - Each ID must be exactly 11 characters long. If the cleaned ID is not exactly 11 characters, it is discarded.
-    - Each ID must start with two letters (case insensitive) immediately followed by a digit.
-      If the starting pattern is not met, the ID is discarded.
+    - Each ID must be exactly 10 or 11 characters long. If the cleaned ID is not exactly 10 or 11 characters, it is discarded.
+    - The ID must either:
+      a) Start with two letters (case insensitive) immediately followed by a digit, OR
+      b) Be exactly 11 numeric digits (and not repetitive like 11111111111)
+    - If neither pattern is met, the ID is discarded.
     
     Parameters:
         df (pd.DataFrame): The input DataFrame.
@@ -798,11 +826,18 @@ def process_identity_numbers(df):
                 # Remove all non-alphanumeric characters (i.e., spaces and special characters)
                 identity_str = re.sub(r'[^a-zA-Z0-9]', '', identity_str)
                 
+                # Case 1: Check for purely numeric IDs that are exactly 11 digits
+                if identity_str.isdigit() and len(identity_str) == 11:
+                    # Check if it's not a repetitive pattern (all same digit)
+                    if len(set(identity_str)) > 1:  # More than one unique digit
+                        return identity_str
+                    return ''  # Repetitive numeric pattern, discard
+                
                 # Discard if the cleaned ID is not exactly 10 or 11 characters
                 if len(identity_str) not in [10, 11]:
                     return ''
                 
-                # Check that the ID starts with two letters followed immediately by a digit.
+                # Check that the ID starts with two letters followed immediately by a digit
                 if not re.match(r'^[a-zA-Z]{2}\d', identity_str):
                     return ''
                 
@@ -841,8 +876,7 @@ def process_DriversLicense(df):
                 # Remove all non-alphanumeric characters (i.e., spaces and special characters)
                 value_str = re.sub(r'[^a-zA-Z0-9]', '', value_str)
                 
-                # Discard if the cleaned value is not exactly 11 characters
-                if len(value_str) not in [10, 11]:
+                if len(value_str) not in [10, 11, 12]:
                     return ''
                 
                 # Check that the value starts with three letters (case insensitive) immediately followed by a digit.
@@ -878,11 +912,13 @@ def process_business_id(df):
                 lambda x: ''.join(char for char in x if char.isalnum())
             )
             
-            # Keep only values that contain both letters and numbers
+            # Keep only values that start with "RN", "BC", or "BN" (case-insensitive)
             df[col] = df[col].where(
-                df[col].str.contains(r'(?=.*[a-zA-Z])(?=.*\d)', regex=True), 
+                # df[col].str.contains(r'(?=.*[a-zA-Z])(?=.*\d)', regex=True), 
+                df[col].str.match(r'^(rn|bc|bn)', case=False).fillna(False),
                 ''
-            )     
+            )
+            
             # Replace 'nan' or 'None' with empty string
             df[col] = df[col].replace({'nan': '', 'None': ''})
     
@@ -1152,59 +1188,89 @@ def process_occu(df):
             df[col] = df[col].apply(occu_title)
     
     return df
-#----------------------------------------------commented out business sector--------------------------------------------------
-# def sec_title(value):
-#     if isinstance(value, str):
-#         # Check for matching values in the dictionary
-#         for category, values in sec_dict.items():
-#             if value in values:
-#                 return category
-#         # If no match, check if the value is numeric
-#         if value.isdigit():
-#             return None  # Return None for numeric values
-#         # If the value is alphabetic, return it unchanged
-#         if value.isalpha():
-#             return value
-#     return None  # Return None for non-string types or unmatched cases
 
-# def process_business_sector(df):
-#     """Process business sector fields in the DataFrame"""
-#     # Define the business sector columns to look for
-#     sector_columns = [
-#         'BUSINESSSECTOR',
-#         # Add any other relevant column names that may appear
-#     ]
-    
-#     # Iterate through the list of potential business sector columns
-#     for col in sector_columns:
-#         if col in df.columns:
-#             # Clean the business sector values
-#             df[col] = df[col].apply(lambda x: x.lower() if isinstance(x, str) else x)
-#             df[col] = df[col].apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', x) if isinstance(x, str) else x)
-#             df[col] = df[col].apply(sec_title)
-    
-#     return df
-
-
-def normalize(s):
-    return re.sub(r'[^A-Za-z0-9]', '', str(s).lower())
-
-def map_accountStatus(value):
+def map_poistioninBusiness(value):
+    """Maps account status values to standardized format."""
     if pd.isna(value) or value is None:
         return None
-    val = normalize(value)
-    for category, variants in AccountStatus_dict.items():
-        cleaned = [normalize(v) for v in variants]
-        if val in cleaned:
+    
+    # Convert to string and clean
+    value = str(value).lower()
+    value = re.sub(r'[^a-zA-Z0-9]', '', value)
+    
+    for category, values in Positioninbusiness_dict.items():
+        # Convert dictionary values to lowercase and remove special characters for comparison
+        dict_values = [str(v).lower().replace(r'[^a-zA-Z0-9]', '') for v in values]
+        if value in dict_values:
             return category
-    return None
+    return None  # Return None if no match is found
 
+def positioninBusiness(df):
+    """Process account status fields in the DataFrame."""
+    # Define the account status columns to look for
+    status_columns = [
+        'PRINCIPALOFFICER1POSITIONINBUSINESS',
+        'PRINCIPALOFFICER2POSITIONINBUSINESS', 
+
+    ]
+
+    # Iterate through the list of potential account status columns
+    for col in status_columns:
+        if col in df.columns:
+            print(f"Processing account status column: {col}")
+            
+            # Clean the account status values
+            df[col] = df[col].apply(lambda x: x.lower() if isinstance(x, str) else x)
+            df[col] = df[col].apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', x) if isinstance(x, str) else x)
+            df[col] = df[col].apply(map_poistioninBusiness)
+            
+            # Print unique values after processing
+            print(f"Unique values in {col} after processing:", df[col].unique())
+    
+    return df
+
+def clear_previous_info_columns(df):
+    """
+    Clear the contents of previous information columns while keeping headers
+    """
+    columns_to_clear = [
+        'PREVIOUSACCOUNTNUMBER',
+        'PREVIOUSNAME',
+        'PREVIOUSCUSTOMERID',
+        'PREVIOUSBRANCHCODE',
+        'BUSINESSSECTOR',
+        'PICTUREFILEPATH'
+    ]
+    
+    print("\n=== CLEARING PREVIOUS INFO COLUMNS ===")
+    for col in columns_to_clear:
+        if col in df.columns:
+            df[col] = ''
+    print("Previous info columns cleared")  
+    return df
+def map_accountStatus(value):
+    """Maps account status values to standardized format."""
+    if pd.isna(value) or value is None:
+        return None
+    
+    # Convert to string and clean
+    value = str(value).lower()
+    value = re.sub(r'[^a-zA-Z0-9]', '', value)
+    
+    for category, values in AccountStatus_dict.items():
+        # Convert dictionary values to lowercase and remove special characters for comparison
+        dict_values = [str(v).lower().replace(r'[^a-zA-Z0-9]', '') for v in values]
+        if value in dict_values:
+            return category
+    return None  # Return None if no match is found
 
 def process_account_status(df):
     """Process account status fields in the DataFrame."""
     # Define the account status columns to look for
     status_columns = [
         'ACCOUNTSTATUS',
+        'STATUS', 
+
     ]
 
     # Iterate through the list of potential account status columns
@@ -1222,7 +1288,6 @@ def process_account_status(df):
     
     return df
 
-
 def exact_map_loan(loan_name):
     # Clean the input
     loan_name_clean = re.sub(r'[^a-zA-Z0-9]', '', str(loan_name)).lower()
@@ -1231,24 +1296,26 @@ def exact_map_loan(loan_name):
         for name in names:
             name_clean = re.sub(r'[^a-zA-Z0-9]', '', str(name)).lower()
             if loan_name_clean == name_clean:
-                return loan_code       
+                return loan_code
     return None
 
 def process_loan_type(df):
-    """Process loan type fields in the DataFrame"""
-    # Define the loan type columns to look for
+    """Process business sector fields in the DataFrame"""
+    # Define the business sector columns to look for
     loan_columns = [
         'FACILITYTYPE',
         # Add any other relevant column names that may appear
     ]
-    # Iterate through the list of potential loan type columns
+    
+    # Iterate through the list of potential business sector columns
     for col in loan_columns:
         if col in df.columns:
-            print(f"Processing loan type column: {col}")
-            df[col] = df[col].apply(exact_map_loan)   
+            # Clean the business sector values
+            df[col] = df[col].apply(lambda x: x.lower() if isinstance(x, str) else x)
+            df[col] = df[col].apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', x) if isinstance(x, str) else x)
+            df[col] = df[col].apply(exact_map_loan)
+    
     return df
-
-
 def map_currency(value):
     """Maps currency values to standardized format."""
     if pd.isna(value) or value is None:
@@ -1322,7 +1389,6 @@ def process_collateral_type(df):
             df[col] = df[col].apply(map_collateraltype)
     
     return df
-
 def map_classification(value):
     """Maps classification values to standardized format."""
     if pd.isna(value) or value is None:
@@ -1458,15 +1524,23 @@ def convert_tenor_to_days(tenor: Union[str, int, float]) -> Optional[int]:
             'day': 1,
             'days': 1,
             'd': 1,
+            'dys':1,
             'week': 7,
             'weeks': 7,
             'w': 7,
             'month': 30,
+            'mnth':30,
+            'mth':30,
+            'mths':30,
+            'mnths':30,
+            'mons':30,
             'months': 30,
             'm': 30,
             'year': 365,
             'years': 365,
             'y': 365,
+            'yr': 365,
+            'yrs': 365,
         }
         for num_str, unit in matches:
             try:
@@ -1538,7 +1612,7 @@ def try_convert_to_float(x):
     x = str(x).strip()
     
     # Remove specific special characters and leading/extra spaces
-    x = re.sub(r'[-₦]', '', x)  # Remove specific special characters
+    x = re.sub(r'[-?]', '', x)  # Remove specific special characters
     x = re.sub(r'\s+', ' ', x)  # Replace multiple spaces with a single space
 
     # First, check if the string is fully numeric (with a single decimal point)
@@ -1596,25 +1670,38 @@ def process_numeric_columns(df):
     
     return df
 
-def clear_previous_info_columns(df):
+def process_collateral_details(df):
     """
-    Clear the contents of previous information columns while keeping headers
-    """
-    columns_to_clear = [
-        'PREVIOUSACCOUNTNUMBER',
-        'PREVIOUSNAME',
-        'PREVIOUSCUSTOMERID',
-        'PREVIOUSBRANCHCODE',
-        'BUSINESSSECTOR',
-        'PICTUREFILEPATH'
-    ]
+    Process the COLLATERALDETAILS column by removing numeric values and special characters.
+    Preserves spaces between words for readability.
     
-    print("\n=== CLEARING PREVIOUS INFO COLUMNS ===")
-    for col in columns_to_clear:
-        if col in df.columns:
-            df[col] = ''
-    print("Previous info columns cleared")  
+    Args:
+        df (pd.DataFrame): Input DataFrame containing COLLATERALDETAILS column
+        
+    Returns:
+        pd.DataFrame: DataFrame with cleaned COLLATERALDETAILS column
+    """
+    if 'COLLATERALDETAILS' in df.columns:
+        def clean_collateral_details(text):
+            if pd.isna(text) or not isinstance(text, str):
+                return text
+            
+            # Remove numeric values
+            text = re.sub(r'\d+', '', text)
+            
+            # Remove special characters but preserve spaces and ampersands
+            # text = re.sub(r'[^a-zA-Z\s&]', '', text)
+            
+            # # Remove multiple spaces and strip
+            # text = re.sub(r'\s+', ' ', text).strip()
+            
+            return text
+            
+        df['COLLATERALDETAILS'] = df['COLLATERALDETAILS'].apply(clean_collateral_details)
+    
     return df
+
+
 
 def merge_individual_borrowers(consu, credit, guar):
     """Merge individual borrower DataFrames"""
@@ -1731,7 +1818,7 @@ def merge_individual_borrowers(consu, credit, guar):
                 fallback_merge = pd.merge(
                     indi,
                     guar_credit_merge,
-                    on='ACCOUNTNUMBER',  # Match on ACCOUNTNUMBER from credit
+                    on='ACCOUNTNUMBER',
                     how='left',
                     indicator=True
                 )
@@ -1740,6 +1827,8 @@ def merge_individual_borrowers(consu, credit, guar):
                 # Drop the extra CUSTOMERID column from credit if it exists
                 columns_to_drop = ['_merge', 'CUSTOMERID_y'] if 'CUSTOMERID_y' in fallback_merge.columns else ['_merge']
                 indi = fallback_merge.drop(columns=columns_to_drop)
+                if 'CUSTOMERID_x' in indi.columns:
+                    indi = indi.rename(columns={'CUSTOMERID_x': 'CUSTOMERID'})
                 print(f"Fallback guarantor merge completed. Final shape: {indi.shape}")
             else:
                 print("No matches found in fallback merge")
@@ -1959,7 +2048,7 @@ def split_commercial_entities(indi):
     "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
     "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
     "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
-    "CHANGE", "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
     "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
     "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
     "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
@@ -1981,7 +2070,7 @@ def split_commercial_entities(indi):
     "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
     "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
     "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
-    "LIMTED", "LIVING", "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
     "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
@@ -1993,13 +2082,13 @@ def split_commercial_entities(indi):
     "POLYTECHNIC", "POULTRY", "POVERTY", "PRECID", "PRIMARY", "PRINT", "PRINTING", "PRINTS", "PRIVATE", "PROD",
     "PRODUCT", "PRODUCTIONS", "PRODUCTS", "PROFILE", "PROJECT", "PROJECTS", "PROPERTIES", "PROPERTY", "PROVINCE", "PRY",
     "PUBLIC", "PUBLICATION",  "PYRAMID", "QUANTITEQUE", "RCCG", "RATTAWU", "REALITIES", "REALTOR", "REALTORS",
-    "RECIPE", "REDUCTION", "REFUGE", "REGISTRAR", "REHOBOTH", "REMITTANCE", "REMMT", "RENTAL", "RESEARCH", "RESORT",
+    "RECIPE", "REDUCTION", "REFUGE", "REGISTRAR", "REMITTANCE", "REMMT", "RENTAL", "RESEARCH", "RESORT",
     "RESORTS", "RESOURCE", "RESOURCES", "RESOURSES", "RESTAURANT", "RESTURANT", "REVENUE", "ROCKS", "ROOFING", "RURAL",
     "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
     "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
     "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
     "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
-    "SOLID", "SOLUTION", "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPECIAL", "SPIRITUAL",
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPIRITUAL",
     "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
     "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
     "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
@@ -2032,11 +2121,11 @@ def split_commercial_entities(indi):
     "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
     "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
     "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
-    "services", "shop", "smallchops", "society", "solution", "solutions", "sons", "spa", "sparepart", "specialist",
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
     "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
     "worldwide", "youth", "youths"
 ]
     # Create a DataFrame to store commercial entities/
@@ -2073,6 +2162,202 @@ def split_commercial_entities(indi):
     print(corpo2.head())
     
     return indi, corpo2
+
+def is_consumer_entity(name, commercial_keywords):
+    """
+    Check if a business name is likely a consumer entity by confirming it 
+    doesn't contain commercial keywords
+    
+    Args:
+        name (str): Business name to check
+        commercial_keywords (list): List of commercial keywords
+    
+    Returns:
+        bool: True if likely a consumer entity, False otherwise
+    """
+    if not isinstance(name, str) or not name.strip():
+        return False
+    
+    # Convert to lowercase and split into words
+    name_words = set(name.lower().split())
+    
+    # Convert keywords to lowercase for case-insensitive comparison
+    commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
+    
+    # Check for standalone commercial keywords
+    commercial_matches = [
+        keyword for keyword in commercial_keywords_lower
+        if keyword in name_words
+    ]
+    
+    # If no commercial keywords are found, it's likely a consumer entity
+    is_consumer = len(commercial_matches) == 0
+    
+    # Debug print for analysis
+    if is_consumer:
+        print(f"Potential consumer entity detected: {name}")
+    
+    return is_consumer
+
+def split_consumer_entities(corpo):
+    """Split consumer entities from corporate borrowers
+    
+    Args:
+        corpo (pd.DataFrame): Corporate borrowers DataFrame
+    
+    Returns:
+        tuple: (Corporate borrowers DataFrame, Consumer entities DataFrame)
+    """
+    # Reuse the same commercial keywords list
+    commercial_keywords = [
+    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
+    "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
+    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",
+    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",
+    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
+    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
+    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
+    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
+    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
+    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
+    "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
+    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
+    "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
+    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
+    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",
+    "ENGINEERING", "ENGINEERS", "ENT", "ENTERPRIS", "ENTERPRISE", "ENVIROMENT", "EQUIPMENT", "ESTATE", "ESTATES", "EXECUTIVE",
+    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",
+    "FEDERAL", "FINANCE", "FITNESS", "FOOD", "FOODS", "FORMATIONS", "FORUM", "FOUNDATION", "FOURSQUARE", "FRIENDSHIP",
+    "FROZEN", "FURNISHING", "FURNITURE", "FURNITURES", "FUTURE", "GADGET", "GALLERIA", "GARDENS", "GARMENTS", "GENERAL",
+    "GEOINFORMATIC", "GEOPLANNERS", "GIFTS", "GLOBA", "GLOBAL", "GLOBE", "GOV", "GOVERNMENT", "GOVT", "GRASSROOTS",
+    "GREENSPRINGS", "GROUP", "GROWERS", "GRP", "GYARTAGERE", "HEALTH", "HELP", "HIGH COURT", "HOLDINGS", "HOMES",
+    "HOSPITA", "HOSPITAL", "HOSPITALITY", "HOTEL", "HOUSE", "HOUSES", "IMPEX", "IMPORT", "IMPORTS", "IMPRESSION",
+    "IND", "INDUSTR", "INDUSTRIE", "INDUSTRIES", "INDUSTRY", "INFINITY", "INFRASTRUCTURE", "INSPECTORATE", "INSPIRATIONAL", "INST",
+    "INSTANTE", "INSTITUTE", "INSTITUTUE", "INSURANCE", "INTEGRA", "INTEGRAL", "INTERCONTINENTAL", "INTERNAL", "INTERNATIONA", "INTERNATIONAL",
+    "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
+    "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
+    "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
+    "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
+    "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
+    "MULTITECH", "MUSICIANS", "Markert", "Marketers", "N U T",  "NATIONAL", "NETWORK", "NIGERIA", "NOODLES",
+    "NORTH", "NURSERY", "NUT", "OCEAN",  "OFFSHORE", "OFPHYSICAL", "OGSG", "OPINION", "ORG",'cup',
+    "ORGANISATION", "ORGANIZATION", "ORIENTAL", "OUTLOOK", "OVERHEAD", "PAINT", "PARTNER", "PARTS", "PAVILION", "PENSION",
+     "PERFORMANCE", "PERFORMING", "PETROCHEMICALS", "PETROLEUM", "PETROLSEAL", "PETROSERVE", "PFA", "PHARMA", "PHARMACEUTICAL",
+    "PHYSIOTHERAPY", "PILLAR", "PLACE", "PLASTIC", "PLAZA", "PLC", "POINT", "POLITICAL", "POLYMALT", "POLYMER",
+    "POLYTECHNIC", "POULTRY", "POVERTY", "PRECID", "PRIMARY", "PRINT", "PRINTING", "PRINTS", "PRIVATE", "PROD",
+    "PRODUCT", "PRODUCTIONS", "PRODUCTS", "PROFILE", "PROJECT", "PROJECTS", "PROPERTIES", "PROPERTY", "PROVINCE", "PRY",
+    "PUBLIC", "PUBLICATION",  "PYRAMID", "QUANTITEQUE", "RCCG", "RATTAWU", "REALITIES", "REALTOR", "REALTORS",
+    "RECIPE", "REDUCTION", "REFUGE", "REGISTRAR", "REMITTANCE", "REMMT", "RENTAL", "RESEARCH", "RESORT",
+    "RESORTS", "RESOURCE", "RESOURCES", "RESOURSES", "RESTAURANT", "RESTURANT", "REVENUE", "ROCKS", "ROOFING", "RURAL",
+    "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
+    "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
+    "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
+    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE",  "SPIRITUAL",
+    "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
+    "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
+    "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
+    "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
+    "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
+    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
+    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS", "WMPCS","sociaty","co operative",
+    "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
+    "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
+    "associate", "associates", "association", "authority", "auto", "automobile", "bakery", "bank", "bar", "beautyspa",
+    "bootcamp", "branch", "broad", "broker", "building", "bureau", "business", "by", "cakes", "capital",
+    "care", "cars", "catering", "catholic", "cattle", "cellphone", "center", "centex", "centre", "chamber",
+    "chambers", "chops", "church", "cleaning", "clothing", "club", "collection", "college", "comm", "communication",
+    "community", "company", "concept", "concepts", "confection", "conservation", "construction", "constructions", "constructs", "consu",
+    "consult", "consultants", "consulting", "contractor", "contribution", "cooperative", "corporate", "country", "couture", "creamery",
+    "creative", "cuisine", "culture", "cupcake", "custodian", "data", "dealers", "deco", "decor", "decoration",
+    "decorations", "design", "designs", "div", "driver", "education", "educational", "empire", "energy", "engineering",
+    "ent", "enter", "enterp", "enterprise", "enterprises", "equity", "estate", "etranzact", "event", "exam",
+    "expert", "exploration", "express", "farmers", "fashion", "fggc", "fgn", "fidson", "finance", "firs",
+    "fish", "food", "foods", "football", "fund", "funds", "furniture", "furnitures", "gallery", "gas",
+    "geoscience", "global", "government", "govt", "gratuity", "grills", "grillz", "groundnut", "group", "hair",
+    "health", "hireservices", "hospital", "hotel", "house", "hqrs", "ifad", "inc", "industrial", "industry",
+    "innovations", "institution", "integrated", "interior", "international", "investment", "ipml", "judicial", "kiddies", "laundry",
+    "league", "leasing", "legacy", "license", "lifestyle", "lightning", "limited", "linen", "link", "liquidation",
+    "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
+    "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
+    "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
+    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
+    "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
+    "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
+    "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
+    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
+    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
+    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
+    "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
+    "worldwide", "youth", "youths"
+]
+    
+    # Create a DataFrame to store consumer entities
+    # Don't copy columns from corpo - we'll build this properly
+    indi2 = pd.DataFrame()
+    
+    # Rows to remove from corporate borrowers
+    rows_to_remove = []
+    extracted_consumers = []
+    
+    # Iterate through corporate borrowers to find consumer entities
+    for index, row in corpo.iterrows():
+        # Get business name for checking
+        if 'BUSINESSNAME' not in row or pd.isna(row['BUSINESSNAME']):
+            continue
+            
+        business_name = str(row['BUSINESSNAME']).strip()
+        
+        # Check if the business name is a consumer entity
+        if is_consumer_entity(business_name, commercial_keywords):
+            # Create a new consumer row from the corporate row
+            consumer_data = {}
+            
+            # Copy all data from the corporate row except BUSINESSNAME
+            for col in row.index:
+                if col != 'BUSINESSNAME':
+                    consumer_data[col] = row[col]
+            
+            # Split the business name into name parts
+            name_parts = business_name.split()
+            
+            # Assign name parts to appropriate fields
+            if len(name_parts) >= 1:
+                consumer_data['SURNAME'] = name_parts[0]
+                
+                if len(name_parts) >= 2:
+                    consumer_data['FIRSTNAME'] = name_parts[1]
+                else:
+                    consumer_data['FIRSTNAME'] = ''
+                    
+                if len(name_parts) >= 3:
+                    consumer_data['MIDDLENAME'] = ' '.join(name_parts[2:])
+                else:
+                    consumer_data['MIDDLENAME'] = ''
+            
+            # Add to extracted consumers list
+            extracted_consumers.append(consumer_data)
+            rows_to_remove.append(index)
+    
+    # Convert extracted consumers to DataFrame if any were found
+    if extracted_consumers:
+        indi2 = pd.DataFrame(extracted_consumers)
+    
+    # Remove identified consumer entities from corporate borrowers
+    corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
+    
+    # Debug prints
+    print("Number of consumer entities found:", len(indi2))
+    print("First few consumer entities:")
+    print(indi2.head())
+    
+    return corpo, indi2
 
 def merge_dataframes(processed_sheets):
     """
@@ -2111,9 +2396,57 @@ def merge_dataframes(processed_sheets):
                 print("\nRenaming columns for extracted commercial entities...")
                 corpo2 = rename_columns(corpo2, ConsuToComm.copy())
                 
+                # Ensure both dataframes have reset indexes
+                corpo = corpo.reset_index(drop=True)
+                corpo2 = corpo2.reset_index(drop=True)
+                
                 print("\nConcatenating extracted commercial entities with corporate data...")
-                corpo = pd.concat([corpo, corpo2], ignore_index=True)
-                print(f"  - Total corporate records after concatenation: {len(corpo)}")
+                try:
+                    # Use columns parameter to ensure concatenation uses only columns from mapping
+                    common_columns = [col for col in ConsuToComm.keys() if col in corpo2.columns and col in corpo.columns]
+                    corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
+                    print(f"  - Total corporate records after concatenation: {len(corpo)}")
+                except Exception as e:
+                    print(f"Error during commercial concatenation: {e}")
+                    # Fallback if concatenation fails
+                    print("Using only original corporate data")
+        
+        # Split consumer entities from the commercial_merged data
+        if not corpo.empty:
+            print("\nSplitting consumer entities from commercial_merged data...")
+            corpo, indi2 = split_consumer_entities(corpo)
+            print(f"  - Corporate records after split: {len(corpo)}")
+            print(f"  - Consumer entities extracted: {len(indi2)}")
+
+            # Rename and concatenate if consumer entities were found
+            if not indi2.empty:
+                print("\nRenaming columns for extracted consumer entities...")
+                # Apply the CommToConsu mapping to rename columns and strictly order them
+                indi2 = rename_columns(indi2, CommToConsu.copy())
+                
+                # Ensure both dataframes have reset indexes
+                indi = indi.reset_index(drop=True)
+                indi2 = indi2.reset_index(drop=True)
+                
+                print("\nConcatenating extracted consumer entities with individual data...")
+                try:
+                    # If indi is empty, just use indi2
+                    if indi.empty:
+                        indi = indi2
+                        print(f"  - Using extracted consumer entities as individual data: {len(indi)} rows")
+                    else:
+                        # Ensure indi has the same column ordering as indi2
+                        indi = rename_columns(indi, CommToConsu.copy())
+                        
+                        # Now that both dataframes have exactly the same columns in the same order,
+                        # we can safely concatenate them
+                        indi = pd.concat([indi, indi2], ignore_index=True)
+                        print(f"  - Total individual records after concatenation: {len(indi)}")
+                except Exception as e:
+                    print(f"Error during consumer concatenation: {str(e)}")
+                    print(f"indi columns: {list(indi.columns)}")
+                    print(f"indi2 columns: {list(indi2.columns)}")
+                    print("Using only original individual data")
         # --- End Added Processing ---
                 
         print("\n=== FINAL MERGED SHEET DATA ===")
@@ -2131,7 +2464,7 @@ def merge_dataframes(processed_sheets):
     "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
     "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
     "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
-    "CHANGE", "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
     "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
     "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
     "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
@@ -2153,7 +2486,7 @@ def merge_dataframes(processed_sheets):
     "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
     "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
     "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
-    "LIMTED", "LIVING", "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
     "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
@@ -2165,13 +2498,13 @@ def merge_dataframes(processed_sheets):
     "POLYTECHNIC", "POULTRY", "POVERTY", "PRECID", "PRIMARY", "PRINT", "PRINTING", "PRINTS", "PRIVATE", "PROD",
     "PRODUCT", "PRODUCTIONS", "PRODUCTS", "PROFILE", "PROJECT", "PROJECTS", "PROPERTIES", "PROPERTY", "PROVINCE", "PRY",
     "PUBLIC", "PUBLICATION",  "PYRAMID", "QUANTITEQUE", "RCCG", "RATTAWU", "REALITIES", "REALTOR", "REALTORS",
-    "RECIPE", "REDUCTION", "REFUGE", "REGISTRAR", "REHOBOTH", "REMITTANCE", "REMMT", "RENTAL", "RESEARCH", "RESORT",
+    "RECIPE", "REDUCTION", "REFUGE", "REGISTRAR", "REMITTANCE", "REMMT", "RENTAL", "RESEARCH", "RESORT",
     "RESORTS", "RESOURCE", "RESOURCES", "RESOURSES", "RESTAURANT", "RESTURANT", "REVENUE", "ROCKS", "ROOFING", "RURAL",
     "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
     "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
     "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
     "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
-    "SOLID", "SOLUTION", "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPECIAL", "SPIRITUAL",
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE",  "SPIRITUAL",
     "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
     "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
     "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
@@ -2204,11 +2537,11 @@ def merge_dataframes(processed_sheets):
     "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
     "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
     "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
-    "services", "shop", "smallchops", "society", "solution", "solutions", "sons", "spa", "sparepart", "specialist",
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
     "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
     "worldwide", "youth", "youths"
 ]
     
@@ -2258,15 +2591,25 @@ def merge_dataframes(processed_sheets):
         print("First few rows of corpo2:")
         print(corpo2.head())
         
-        # Combine commercial entities with existing corporate borrowers
-        corpo = pd.concat([corpo, corpo2], ignore_index=True)
+        # Ensure both dataframes have reset indexes
+        corpo = corpo.reset_index(drop=True)
+        corpo2 = corpo2.reset_index(drop=True)
         
-        # Debug statement to confirm addition
-        print("\nAfter Adding Commercial Entities:")
-        print("Total corporate borrowers:", len(corpo))
-        print("Columns in final corpo:", corpo.columns)
-        print("First few rows after addition:")
-        print(corpo.head())
+        # Combine commercial entities with existing corporate borrowers
+        try:
+            # Use columns parameter to ensure concatenation uses only common columns from mapping
+            common_columns = [col for col in ConsuToComm.keys() if col in corpo2.columns and col in corpo.columns]
+            corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
+            
+            # Debug statement to confirm addition
+            print("\nAfter Adding Commercial Entities:")
+            print("Total corporate borrowers:", len(corpo))
+            print("Columns in final corpo:", corpo.columns)
+            print("First few rows after addition:")
+            print(corpo.head())
+        except Exception as e:
+            print(f"Error during commercial concatenation: {e}")
+            print("Using only original corporate data")
 
         # Additional check to verify commercial entities were added
         commercial_entities_in_corpo = corpo[
@@ -2279,23 +2622,75 @@ def merge_dataframes(processed_sheets):
         print("First few commercial entities:")
         print(commercial_entities_in_corpo.head())
     
+    # Step 5: Split consumer entities from corporate borrowers
+    corpo, indi2 = split_consumer_entities(corpo)
+    
+    print("\n=== SPLIT CONSUMER ENTITIES ===")
+    print("Corporate records after split:", len(corpo))
+    print("Consumer entities extracted:", len(indi2))
+    
+    # Step 6: Rename consumer entities before combining
+    if not indi2.empty:
+        # Rename indi2 columns to match individual borrower template
+        print("\nRenaming columns for extracted consumer entities...")
+        indi2 = rename_columns(indi2, CommToConsu.copy())
+        
+        # Debug statement to show indi2 details before concatenation
+        print("Number of consumer entities:", len(indi2))
+        print("First few rows of indi2:")
+        print(indi2.head())
+        
+        # Ensure both dataframes have reset indexes
+        indi = indi.reset_index(drop=True)
+        indi2 = indi2.reset_index(drop=True)
+        
+        # Combine consumer entities with existing individual borrowers
+        try:
+            # If indi is empty, just use indi2
+            if indi.empty:
+                indi = indi2
+                print(f"Using extracted consumer entities as individual data: {len(indi)} rows")
+            else:
+                # Ensure indi has the same column ordering as CommToConsu
+                indi = rename_columns(indi, CommToConsu.copy())
+                
+                # Now both dataframes have exactly the same columns in the same order,
+                # we can safely concatenate them
+                indi = pd.concat([indi, indi2], ignore_index=True)
+                print(f"Total individual records after concatenation: {len(indi)}")
+                    
+            # Debug statement to confirm addition
+            print("\nAfter Adding Consumer Entities:")
+            print("Total individual borrowers:", len(indi))
+            print("Columns in final indi:", list(indi.columns[:10]) + ["..."])  # Show first 10 columns
+            print("First few rows after addition:")
+            print(indi.head())
+        except Exception as e:
+            print(f"Error during consumer concatenation: {str(e)}")
+            print(f"indi columns: {list(indi.columns)}")
+            print(f"indi2 columns: {list(indi2.columns)}")
+            print("Using only original individual data")
+    
     return indi, corpo
  
 def rename_columns(df, column_mapping):
     """
-    Rename columns based on a mapping dictionary
+    Rename columns based on a mapping dictionary and strictly enforce column order
     
     Args:
         df (pd.DataFrame): Input DataFrame
         column_mapping (dict): Mapping of column names
     
     Returns:
-        pd.DataFrame: DataFrame with renamed columns
+        pd.DataFrame: DataFrame with renamed columns and ordered according to mapping
     """
     try:
+        # Create a fresh copy of the dataframe to avoid modifying the original
+        df = df.copy()
+        
         # Print original columns before renaming
         print("Original columns before renaming:", list(df.columns))
-        print("Mapping being used:", column_mapping)
+        print("Mapping dictionary has", len(column_mapping), "keys")
 
         # Rename columns that match the mapping
         for column in list(df.columns):  # Use list() to create a copy of columns
@@ -2308,26 +2703,61 @@ def rename_columns(df, column_mapping):
         # Print columns after initial renaming
         print("Columns after renaming:", list(df.columns))
 
-        # Add missing columns from the dictionary
-        for mapped_column in column_mapping.keys():
-            if mapped_column not in df.columns:
-                df[mapped_column] = None
-                print(f"Added missing column: {mapped_column}")
+        # Check for duplicate columns and make them unique
+        if len(df.columns) != len(set(df.columns)):
+            print("WARNING: Duplicate column names detected, making them unique...")
+            # Create a new columns list without duplicates
+            seen = set()
+            new_columns = []
+            for col in df.columns:
+                if col not in seen:
+                    seen.add(col)
+                    new_columns.append(col)
+                else:
+                    # For duplicates, add a suffix
+                    i = 1
+                    while f"{col}_{i}" in seen:
+                        i += 1
+                    seen.add(f"{col}_{i}")
+                    new_columns.append(f"{col}_{i}")
+            
+            # Assign the new unique column names
+            df.columns = new_columns
         
         # Print columns before final reordering
         print("Columns before reordering:", list(df.columns))
 
-        # Reorder the columns based on the keys in the dictionary
-        df = df[list(column_mapping.keys())]
+        # Create ordered DataFrame using concat instead of adding columns one by one
+        # This avoids DataFrame fragmentation warning
+        column_dfs = []
+        for col in column_mapping.keys():
+            if col in df.columns:
+                # For existing columns, use the values from the original DataFrame
+                column_dfs.append(pd.DataFrame({col: df[col]}))
+            else:
+                # For missing columns, create a new DataFrame with None values
+                column_dfs.append(pd.DataFrame({col: [None] * len(df)}))
+        
+        # Use concat to join all columns at once
+        if column_dfs:
+            ordered_df = pd.concat(column_dfs, axis=1)
+        else:
+            # If no columns were found, create an empty DataFrame with the right columns
+            ordered_df = pd.DataFrame(columns=list(column_mapping.keys()))
+        
+        # Reset index to ensure clean index for concatenation
+        ordered_df = ordered_df.reset_index(drop=True)
         
         # Print final columns
-        print("Final columns after reordering:", list(df.columns))
+        print("Final columns after strict reordering:", list(ordered_df.columns))
+        print(f"Final dataframe has {len(ordered_df.columns)} columns and {len(ordered_df)} rows")
 
-        return df
+        return ordered_df
     except Exception as e:
         print(f"Error in rename_columns: {e}")
         traceback.print_exc()
         return df
+
 
 def modify_middle_names(df):
     """Keep only the first name in the specified middle name columns."""
@@ -2344,19 +2774,27 @@ def modify_middle_names(df):
             df[col] = df[col].apply(lambda x: str(x).split()[0] if pd.notna(x) and str(x).strip() else '')
     
     return df
-
 def trim_strings_to_59(df):
-
+    """
+    Trim all string values in the DataFrame to 59 characters maximum
+    
+    Args:
+        df (pd.DataFrame): Input DataFrame
+        
+    Returns:
+        pd.DataFrame: DataFrame with all string values trimmed to 59 characters
+    """
     # Define the trimming function
     def trim_string(s):
-        if isinstance(s, str) and len(s) > 60:
-            return s[:59]  # Trim to 58 characters as requested
+        if isinstance(s, str) and len(s) > 59:
+            return s[:58]  # Trim to 58 characters as requested
         return s
     
     # Apply the function to all elements in the DataFrame
     print("\n=== TRIMMING STRING VALUES TO 59 CHARACTERS ===")
     df = df.applymap(trim_string)
     print("String trimming completed")
+    
     return df
 
 def upload_file(request):
@@ -2424,10 +2862,10 @@ def upload_file(request):
                     cleaned_name = clean_sheet_name(sheet_name)
                     # Process sheet
                     cleaned_df = sheet_data.copy()
-                    cleaned_df.replace('N/A', '', inplace=True)
-                    # Fix column cleaning sequence
+                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill'], '', inplace=True)
+# Fix column cleaning sequence
                     cleaned_df.columns = [
-                        str(col).upper().strip()  # Ensure column names are strings first
+                        str(col).upper().strip()  # Convert to uppercase first, then strip
                         for col in cleaned_df.columns
                     ]
                     cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
@@ -2464,8 +2902,8 @@ def upload_file(request):
 
                     # Apply processing steps
                     cleaned_df = process_dates(cleaned_df)
-                    cleaned_df = process_special_characters(cleaned_df) 
                     cleaned_df = process_names(cleaned_df)
+                    cleaned_df = process_special_characters(cleaned_df) 
                     cleaned_df = process_nationality(cleaned_df)
                     cleaned_df = process_gender(cleaned_df)
                     cleaned_df = process_states(cleaned_df)
@@ -2492,6 +2930,8 @@ def upload_file(request):
                     cleaned_df = process_occu(cleaned_df)
                     cleaned_df = process_DriversLicense(cleaned_df)
                     cleaned_df = process_otherid(cleaned_df)
+                    cleaned_df = process_collateral_details(cleaned_df)
+                    cleaned_df = positioninBusiness(cleaned_df)
                     cleaned_df = trim_strings_to_59(cleaned_df)
 
    #---------------------------------------------------------ABANDONED FOR NOW------------------------------------------                 
@@ -2515,9 +2955,7 @@ def upload_file(request):
                 indi = remove_duplicates(indi)
                 corpo = remove_duplicates(corpo)
 
-                # Trim strings to 59 characters
-                # indi = trim_strings_to_59(indi)
-                # corpo = trim_strings_to_59(corpo)
+                
 
                 total_individual_records = len(indi) if not indi.empty else 0
                 total_corporate_records = len(corpo) if not corpo.empty else 0
@@ -2631,3 +3069,4 @@ def upload_file(request):
         form = ExcelUploadForm()
     
     return render(request, 'upload.html', {'form': form})
+
