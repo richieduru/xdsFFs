@@ -650,8 +650,6 @@ def process_special_characters(df):
         'BRANCH CODE',
         'CUSTOMERBRANCHUCODE',
         'CUSTOMERBRANCHCODE',
-        'ACCOUNTNUMBER',
-        'CUSTOMERSACCOUNTNUMBER',
         'EMAIL',
         'EMAILADDRESS',
         'PRINCIPALOFFICER1EMAILADDRESS',
@@ -701,6 +699,12 @@ def process_special_characters(df):
         'PRIMARYADDRESSCITY',
         'COLLATERALDETAILS'
     ]
+    
+    # Account number columns that should preserve '/' and '-'
+    account_number_columns = [
+        'ACCOUNTNUMBER',
+        'CUSTOMERSACCOUNTNUMBER'
+    ]
 
     # Find processable columns (those not in excluded list)
     processable_columns = [col for col in df.columns if col not in excluded_columns]
@@ -710,7 +714,12 @@ def process_special_characters(df):
         try:
             # Check if the column has any non-null values before processing
             if df[column].notna().any():
-                if column in address_columns:
+                if column in account_number_columns:
+                    # Special handling for account numbers - keep '/' and '-'
+                    df[column] = df[column].apply(
+                        lambda x: re.sub(r'[^a-zA-Z0-9/\-]', '', str(x)) if pd.notnull(x) else x
+                    )
+                elif column in address_columns:
                     # Keep '&' in address columns
                     df[column] = df[column].apply(
                         lambda x: re.sub(r'[^a-zA-Z0-9&]', ' ', str(x)) if pd.notnull(x) else x
@@ -2000,7 +2009,7 @@ def remove_duplicates(df, columns_to_check=None):
 
 def is_commercial_entity(name, commercial_keywords):
     """
-    Check for commercial entities by looking at standalone words
+    Check for commercial entities by looking at standalone words and multi-word abbreviations
     
     Args:
         name (str): Full name to check
@@ -2012,21 +2021,34 @@ def is_commercial_entity(name, commercial_keywords):
     if not isinstance(name, str):
         return False
     
-    # Convert to lowercase and split into words
-    name_words = set(name.lower().split())
+    # Convert to lowercase for case-insensitive comparison
+    name_lower = name.lower()
     
-     # Convert keywords to lowercase for case-insensitive comparison
+    # Convert to lowercase and split into words for single word matching
+    name_words = set(name_lower.split())
+    
+    # Convert keywords to lowercase for case-insensitive comparison
     commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
-    # Check for standalone commercial keywords
-    commercial_matches = [
+    
+    # 1. Check for standalone commercial keywords (word by word)
+    word_matches = [
         keyword for keyword in commercial_keywords_lower
         if keyword in name_words
     ]
     
+    # 2. Check for multi-word abbreviations and phrases in the full name
+    phrase_matches = [
+        keyword for keyword in commercial_keywords_lower
+        if ' ' in keyword and keyword in name_lower
+    ]
+    
+    # Combine all matches
+    commercial_matches = word_matches + phrase_matches
+    
     # Debug print for analysis
     if commercial_matches:
         print(f"Potential commercial entity detected: {name}")
-        print(f"Matched standalone keywords: {commercial_matches}")
+        print(f"Matched keywords/phrases: {commercial_matches}")
     
     return len(commercial_matches) > 0
 
@@ -2041,25 +2063,25 @@ def split_commercial_entities(indi):
     """
     # More comprehensive commercial keywords
     commercial_keywords = [
-    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
-    "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
-    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",
-    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",
-    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
-    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
-    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
-     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
-    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
-    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
-    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
+    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck','entreprise','superstores','beauty place','luxuries',
+    "ASUU", "AAWUN", "ACADEMI", "ACADEMY",  "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms','ASSOTIOTION','all boys','A B I Q M','abiqm','cemetary','COMMITEE','POLYTECNIC','high court','housing',
+    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",'consults','giggles', 'rice ass',' ENTTERPRISES','hosp','gen hosp','internat','airport',
+    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",'court','upper','orphans','vulnerable','supt','init','events','outdoors','initiative','support',
+    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",'COMMITTEE','FEEDING','G D S S','SSAUTHRIAL','foto','GSS','L G',
+    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",'ASSCTN','rice',' CO OPERATIVE','PROCESSING','L G C S D P',
+    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",'L G R C','J S S','CARPENTER',
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",'devlopment','FATENING','G D S','G S','P T A', 'ESSSSSS',
+    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",'COUNCILE','COOPERATIV', 'ASSO',
+    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",'S U G','G G D S S D','SBMC','WATER','BOAD','KASCOM',
+    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",'KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
     "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
-    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
-    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",'P T A ESSSSSS CAZ','SUPPORT',
+    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",'TREASURY','feeding',
     "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
-    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
-    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",
+    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",'MAKARANTAR',' KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
+    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",'KUNGIYAR',
     "ENGINEERING", "ENGINEERS", "ENT", "ENTERPRIS", "ENTERPRISE", "ENVIROMENT", "EQUIPMENT", "ESTATE", "ESTATES", "EXECUTIVE",
-    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",
+    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",'BIRNINKEBBI',
     "FEDERAL", "FINANCE", "FITNESS", "FOOD", "FOODS", "FORMATIONS", "FORUM", "FOUNDATION", "FOURSQUARE", "FRIENDSHIP",
     "FROZEN", "FURNISHING", "FURNITURE", "FURNITURES", "FUTURE", "GADGET", "GALLERIA", "GARDENS", "GARMENTS", "GENERAL",
     "GEOINFORMATIC", "GEOPLANNERS", "GIFTS", "GLOBA", "GLOBAL", "GLOBE", "GOV", "GOVERNMENT", "GOVT", "GRASSROOTS",
@@ -2070,7 +2092,7 @@ def split_commercial_entities(indi):
     "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
     "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
     "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
-    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS",  "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
     "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
@@ -2087,14 +2109,14 @@ def split_commercial_entities(indi):
     "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
     "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
     "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
-    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
-    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPIRITUAL",
+    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",'solotions','special bread',
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPIRITUAL",'boutique','insights','kitchen','traffic','entreprises',
     "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
     "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
     "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
-    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
+    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",'essentials',
     "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS", "WMPCS","sociaty","co operative",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
@@ -2116,17 +2138,17 @@ def split_commercial_entities(indi):
     "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
     "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
     "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
-    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
+    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners",  "pavilion",'cassava',
     "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
     "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
     "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
-    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
-    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
-    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
-    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
+    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",'Bee',
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",'ingredients','ingredient',
+    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",'bee keeping','keeping',
+    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",'andycos',
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
-    "worldwide", "youth", "youths"
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor',
+    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip',
 ]
     # Create a DataFrame to store commercial entities/
     corpo2 = pd.DataFrame(columns=indi.columns)
@@ -2166,7 +2188,7 @@ def split_commercial_entities(indi):
 def is_consumer_entity(name, commercial_keywords):
     """
     Check if a business name is likely a consumer entity by confirming it 
-    doesn't contain commercial keywords
+    doesn't contain commercial keywords or multi-word abbreviations
     
     Args:
         name (str): Business name to check
@@ -2178,17 +2200,29 @@ def is_consumer_entity(name, commercial_keywords):
     if not isinstance(name, str) or not name.strip():
         return False
     
-    # Convert to lowercase and split into words
-    name_words = set(name.lower().split())
+    # Convert to lowercase for case-insensitive comparison
+    name_lower = name.lower()
+    
+    # Convert to lowercase and split into words for single word matching
+    name_words = set(name_lower.split())
     
     # Convert keywords to lowercase for case-insensitive comparison
     commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
     
-    # Check for standalone commercial keywords
-    commercial_matches = [
+    # 1. Check for standalone commercial keywords (word by word)
+    word_matches = [
         keyword for keyword in commercial_keywords_lower
         if keyword in name_words
     ]
+    
+    # 2. Check for multi-word abbreviations and phrases in the full name
+    phrase_matches = [
+        keyword for keyword in commercial_keywords_lower
+        if ' ' in keyword and keyword in name_lower
+    ]
+    
+    # Combine all matches
+    commercial_matches = word_matches + phrase_matches
     
     # If no commercial keywords are found, it's likely a consumer entity
     is_consumer = len(commercial_matches) == 0
@@ -2210,25 +2244,25 @@ def split_consumer_entities(corpo):
     """
     # Reuse the same commercial keywords list
     commercial_keywords = [
-    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
-    "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
-    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",
-    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",
-    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
-    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
-    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
-     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
-    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
-    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
-    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
+    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck','entreprise','superstores','beauty place','luxuries',
+    "ASUU", "AAWUN", "ACADEMI", "ACADEMY",  "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms','ASSOTIOTION','all boys','A B I Q M','abiqm','cemetary','COMMITEE','POLYTECNIC','high court','housing',
+    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",'consults','giggles', 'rice ass',' ENTTERPRISES','hosp','gen hosp','internat','airport',
+    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",'court','upper','orphans','vulnerable','supt','init','events','outdoors','initiative','support',
+    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",'COMMITTEE','FEEDING','G D S S','SSAUTHRIAL','foto','GSS','L G',
+    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",'ASSCTN','rice',' CO OPERATIVE','PROCESSING','L G C S D P',
+    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",'L G R C','J S S','CARPENTER',
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",'devlopment','FATENING','G D S','G S','P T A', 'ESSSSSS',
+    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",'COUNCILE','COOPERATIV', 'ASSO',
+    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",'S U G','G G D S S D','SBMC','WATER','BOAD','KASCOM',
+    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",'KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
     "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
-    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
-    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",'P T A ESSSSSS CAZ','SUPPORT',
+    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",'TREASURY','feeding',
     "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
-    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
-    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",
+    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",'MAKARANTAR',' KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
+    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",'KUNGIYAR',
     "ENGINEERING", "ENGINEERS", "ENT", "ENTERPRIS", "ENTERPRISE", "ENVIROMENT", "EQUIPMENT", "ESTATE", "ESTATES", "EXECUTIVE",
-    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",
+    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",'BIRNINKEBBI',
     "FEDERAL", "FINANCE", "FITNESS", "FOOD", "FOODS", "FORMATIONS", "FORUM", "FOUNDATION", "FOURSQUARE", "FRIENDSHIP",
     "FROZEN", "FURNISHING", "FURNITURE", "FURNITURES", "FUTURE", "GADGET", "GALLERIA", "GARDENS", "GARMENTS", "GENERAL",
     "GEOINFORMATIC", "GEOPLANNERS", "GIFTS", "GLOBA", "GLOBAL", "GLOBE", "GOV", "GOVERNMENT", "GOVT", "GRASSROOTS",
@@ -2239,7 +2273,7 @@ def split_consumer_entities(corpo):
     "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
     "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
     "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
-    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS",  "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
     "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
@@ -2256,14 +2290,14 @@ def split_consumer_entities(corpo):
     "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
     "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
     "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
-    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
-    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE",  "SPIRITUAL",
+    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",'solotions','special bread',
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPIRITUAL",'boutique','insights','kitchen','traffic','entreprises',
     "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
     "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
     "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
-    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
+    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",'essentials',
     "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS", "WMPCS","sociaty","co operative",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
@@ -2285,18 +2319,19 @@ def split_consumer_entities(corpo):
     "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
     "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
     "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
-    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
+    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners",  "pavilion",'cassava',
     "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
     "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
     "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
-    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
-    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
-    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
-    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
+    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",'Bee',
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",'ingredients','ingredient',
+    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",'bee keeping','keeping',
+    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",'andycos',
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
-    "worldwide", "youth", "youths"
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor',
+    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip'
 ]
+
     
     # Create a DataFrame to store consumer entities
     # Don't copy columns from corpo - we'll build this properly
@@ -2341,6 +2376,9 @@ def split_consumer_entities(corpo):
                 else:
                     consumer_data['MIDDLENAME'] = ''
             
+            # Add DEPENDANTS column with '00' value
+            consumer_data['DEPENDANTS'] = '00'
+            
             # Add to extracted consumers list
             extracted_consumers.append(consumer_data)
             rows_to_remove.append(index)
@@ -2348,6 +2386,7 @@ def split_consumer_entities(corpo):
     # Convert extracted consumers to DataFrame if any were found
     if extracted_consumers:
         indi2 = pd.DataFrame(extracted_consumers)
+        print(f"Ensured DEPENDANTS column is populated with '00' for {len(indi2)} extracted consumer records")
     
     # Remove identified consumer entities from corporate borrowers
     corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
@@ -2397,19 +2436,33 @@ def merge_dataframes(processed_sheets):
                 corpo2 = rename_columns(corpo2, ConsuToComm.copy())
                 
                 # Ensure both dataframes have reset indexes
-                corpo = corpo.reset_index(drop=True)
+                if not corpo.empty:
+                    corpo = corpo.reset_index(drop=True)
                 corpo2 = corpo2.reset_index(drop=True)
                 
                 print("\nConcatenating extracted commercial entities with corporate data...")
                 try:
-                    # Use columns parameter to ensure concatenation uses only columns from mapping
-                    common_columns = [col for col in ConsuToComm.keys() if col in corpo2.columns and col in corpo.columns]
-                    corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
-                    print(f"  - Total corporate records after concatenation: {len(corpo)}")
+                    # If corpo is empty, just use corpo2
+                    if corpo.empty:
+                        corpo = corpo2
+                        print(f"  - Using extracted commercial entities as corporate data: {len(corpo)} rows")
+                    else:
+                        # Use columns parameter to ensure concatenation uses only columns from mapping
+                        common_columns = [col for col in corpo2.columns if col in corpo.columns]
+                        if not common_columns:
+                            # If no common columns, use all columns from corpo2
+                            corpo = pd.concat([corpo, corpo2], ignore_index=True, sort=False)
+                        else:
+                            corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
+                        print(f"  - Total corporate records after concatenation: {len(corpo)}")
                 except Exception as e:
                     print(f"Error during commercial concatenation: {e}")
-                    # Fallback if concatenation fails
-                    print("Using only original corporate data")
+                    print(f"corpo columns: {list(corpo.columns)}")
+                    print(f"corpo2 columns: {list(corpo2.columns)}")
+                    # If concatenation fails, at least ensure corpo2 is preserved
+                    if corpo.empty:
+                        corpo = corpo2.copy()
+                        print("Using only extracted commercial entities as corporate data")
         
         # Split consumer entities from the commercial_merged data
         if not corpo.empty:
@@ -2446,7 +2499,10 @@ def merge_dataframes(processed_sheets):
                     print(f"Error during consumer concatenation: {str(e)}")
                     print(f"indi columns: {list(indi.columns)}")
                     print(f"indi2 columns: {list(indi2.columns)}")
-                    print("Using only original individual data")
+                    # If concatenation fails, at least ensure indi2 is preserved
+                    if indi.empty:
+                        indi = indi2.copy()
+                        print("Using only extracted consumer entities as individual data")
         # --- End Added Processing ---
                 
         print("\n=== FINAL MERGED SHEET DATA ===")
@@ -2456,26 +2512,27 @@ def merge_dataframes(processed_sheets):
         return indi, corpo
 
     # Regular processing for non-merged sheets
+
     commercial_keywords = [
-    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG", "LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck',
-    "ASUU", "AAWUN", "ACADEMI", "ACADEMY", "ACCT", "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms',
-    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",
-    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",
-    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",
-    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",
-    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",
-     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",
-    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",
-    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",
-    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",
+    "CREDIT", "GVL", "LOA", "POL", "SON", "NIG","departmental","textbook","LTD", "AAWUNPCU",'Trader', 'farmer', 'life stock','livestock','chowdeck','entreprise','superstores','beauty place','luxuries',
+    "ASUU", "AAWUN", "ACADEMI", "ACADEMY",  "ADCOMTECH", "ADVISER", "ADVOCATE", "ADVOCATES",'blooms','ASSOTIOTION','all boys','A B I Q M','abiqm','cemetary','COMMITEE','POLYTECNIC','high court','housing',
+    "AFFAIRS", "AGENCIES", "AGENCY", "AGENDA", "AGRIC", "AGRICULTURAL", "AGRICULTURE", "ALLIED", "ALLOCATION", "ALUMINIUM",'consults','giggles', 'rice ass',' ENTTERPRISES','hosp','gen hosp','internat','airport',
+    "ANGLICAN", "ANNOINTED",  "ASSEMBLIES", "ASSEMBLY", "ASSETS", "ASSICIATES", "ASSOCIATE", "ASSOCIATES", "ASSOCIATION",'court','upper','orphans','vulnerable','supt','init','events','outdoors','initiative','support',
+    "ASSOCIATIONS", "ASSOUTION", "AUTO",  "BATHROOM", "BIOMEDICAL", "BOARD", "BOARDS", "BRANCH", "BREAK",'COMMITTEE','FEEDING','G D S S','SSAUTHRIAL','foto','GSS','L G',
+    "BROKERS", "BROTHERS", "BUREAU", "BUSINESS", "BUTCHERS", "CAFETERIA", "CAMP", "CAPITAL", "CARPET",'ASSCTN','rice',' CO OPERATIVE','PROCESSING','L G C S D P',
+    "CARPETS", "CARS", "CATERING", "CCTU", "CELLULAR", "CEMENT", "CENTER", "CENTRE", "CHALLENGE", "CHAMBERS",'L G R C','J S S','CARPENTER',
+     "CHAPTER", "CHARISMATIC", "CHEMICAL", "CHEMICALS", "CHEMISTS", "CHICKEN", "CHURCH", "CITIZEN", "CITIZENS",'devlopment','FATENING','G D S','G S','P T A', 'ESSSSSS',
+    "CLAY", "CLINIC", "CLOSET", "CLUB", "COOPERATIVE", "COEASU", "COHEADS", "COLLECTION", "COLLECTIONS", "COLLEGE",'COUNCILE','COOPERATIV', 'ASSO',
+    "COLOUR",  "COMMERCIAL", "COMMUNICA", "COMMUNICATION", "COMMUNICATIONS", "COMP", "COMPANY", "COMPRHENSIVE", "COMPUTER",'S U G','G G D S S D','SBMC','WATER','BOAD','KASCOM',
+    "COMPUTERS", "CONCEPT", "CONCEPTS", "CONFERENCE", "CONFRENCE", "CONNECT", "CONSORTIUM", "CONST", "CONSTR", "CONSUING",'KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
     "CONSUINGD", "CONSULT", "CONSULTA", "CONSULTANCY", "CONSULTANTS", "CONSULTING", "CONSUMERS", "CONTACT", "CONTRACTOR", "CONTRACTORS",
-    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",
-    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",
+    "CONTROL", "COOP", "CORP", "CORPORATES", "CORPORATION",  "COY", "CRADLES", "CREATIONS", "CTV",'P T A ESSSSSS CAZ','SUPPORT',
+    "CURRENT", "DEPARTMENT", "DEPOT", "DEPT", "DESIGN", "DESIGNS", "DEV", "DEVELOPME", "DEVELOPMENT", "DIGITAL",'TREASURY','feeding',
     "DIOCESE", "DIRECTORATE", "DISABLE", "DISPENSARY", "DIST", "DISTRICT", "DIVERSIFIED", "DIVISION", "DOCKYARD", "DORMANT",
-    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",
-    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",
+    "DRILL", "DRINK", "DRINKS", "DRIVERS", "EAST", "ECOBANK", "EDUCATION", "ELECRO", "ELECT", "ELECTRICAL",'MAKARANTAR',' KUNGIYAR TAIMAKON KAI DA KAI TA GURAMU A',
+    "ELECTRICITY", "ELECTRO", "ELECTROMART", "ELECTRONIC", "ELECTRONICS", "EMAGITIONS", "EMBASSY", "EMPLOYEE", "EMPORIUM", "ENERGY",'KUNGIYAR',
     "ENGINEERING", "ENGINEERS", "ENT", "ENTERPRIS", "ENTERPRISE", "ENVIROMENT", "EQUIPMENT", "ESTATE", "ESTATES", "EXECUTIVE",
-    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",
+    "EXERCISE", "EXPENDITURE", "EXPORT", "EXPORTS", "FABRIC", "FAMILY", "FARM", "FARMER", "FARMERS", "FARMS",'BIRNINKEBBI',
     "FEDERAL", "FINANCE", "FITNESS", "FOOD", "FOODS", "FORMATIONS", "FORUM", "FOUNDATION", "FOURSQUARE", "FRIENDSHIP",
     "FROZEN", "FURNISHING", "FURNITURE", "FURNITURES", "FUTURE", "GADGET", "GALLERIA", "GARDENS", "GARMENTS", "GENERAL",
     "GEOINFORMATIC", "GEOPLANNERS", "GIFTS", "GLOBA", "GLOBAL", "GLOBE", "GOV", "GOVERNMENT", "GOVT", "GRASSROOTS",
@@ -2486,7 +2543,7 @@ def merge_dataframes(processed_sheets):
     "INTL", "INV", "INVESMENT", "INVESMENTS", "INVESTMEN", "INVESTMENT", "INVESTMENTS", "INVESTMESTS", "JOINT", "KAD",
     "KONSULT", "L E A", "LEA", "LGE A", "LAB", "LABORATORIES", "LABORATORY", "LAPTOP", "LEASING", "LEGACY",
     "LEGAL", "LEISURE", "LGA", "LGEA", "LIBRARY",  "LIMI", "LIMIT", "LIMITE", "LIMITED",
-    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS", "LOKOJA", "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
+    "LIMTED",  "LOANS", "LOCAL", "LOGISTICS",  "MACRO", "MAGER", "MANAGEMENT", "MANAGERS",
     "MANUFACT", "MANUFACTURE", "MANUFACTURERS", "MANUFACTURING", "MARBLE", "MARKET", "MARKETING", "MASHIDIMAMI", "MATHNIC", "MEDIA",
     "MEDICAL", "MERCHANDISE", "MGMT", "MICRO", "MICROFINANCE", "MILLENNIUM", "MINERAL", "MINERALS", "MINING", "MINISTRIES",
     "MINISTRY", "MINTING", "MISSION", "MOBILE", "MODERN", "MOSQUE", "MOTORS", "MPCS", "MULTI", "MULTIPURPOSE",
@@ -2503,15 +2560,15 @@ def merge_dataframes(processed_sheets):
     "Relations", "Resources", "Restructure", "SADP", "SEPA", "SGARI", "SAFETY", "SALES", "SALON",
     "SANCTUARY", "SAVINGS", "SAVIOURS", "SCH", "SCHEME", "SCHEMES", "SCHOOL", "SCHOOLS", "SCIENTIFIC", "SECODARY",
     "SECONDARY", "SECRETARIAT", "SECURITIES", "SECURITY", "SEEDS", "SELLER", "SELLERS", "SERV", "SERVANT", "SERVANTS",
-    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",
-    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE",  "SPIRITUAL",
+    "SERVI", "SERVICES", "SHARES", "SHIPPING", "SOCEITY", "SOCIETY", "SOLICITOR", "SOLICITORS",'solotions','special bread',
+    "SOLID",  "SOLUTIONS", "SONS", "SOTER", "SOUND", "SOUTH", "SPARE", "SPIRITUAL",'boutique','insights','kitchen','traffic','entreprises',
     "SPORT", "SPORTS", "SPRAYING", "SSANIP", "STANDARD", "STATE", "STATION", "STEEL", "STOC", "STOCK",
     "STORE", "STORES", "STRATEGIC", "STRUCTURAL", "STUDENTS", "SUBSCRIPTION", "SUBSTANCE", "SUITES", "SUPER", "SUPPLY",
     "SUPPY", "SURPRISES", "SURVEILLANCE", "SURVEY", "SYSTEM", "SYSTEMS", "TABERNACLE", "TABLE", "TAX", "TEC",
     "TECHNICAL", "TECHNO", "TECHNOLOGIE", "TECHNOLOGIES", "TELECOMS", "TELEVISION", "TEXTILES", "THEME", "THINKING", "TIMELESS",
     "TODDLERS", "TOTAL", "TOURIST", "TRADE", "TRADER", "TRADERS", "TRADING", "TRAINING", "TRANS", "TRAVEL",
-    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",
-    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS",   "WMPCS",
+    "TRAVELS", "TRUCK", "TRUCKS", "Traditional",  "UNIMAID", "UNION", "UNIONS", "UNIV", "UNIVERSITY",'essentials',
+    "USERS", "VALLEY", "VENT", "VENTURE", "VENTURES", "VESSEL", "VESSELS", "WMPCS","sociaty","co operative",
     "WARD",  "WIRELESS", "WOMEN", "WOMEN OF FAITH", "WORKERS", "WORKS", "WORSHIP", "WSSSRP", "XTIAN",
     "YOUTH", "ZONAL", "ZONE", "academics", "academy", "accessories", "africa", "agro", "army", "art",
     "associate", "associates", "association", "authority", "auto", "automobile", "bakery", "bank", "bar", "beautyspa",
@@ -2532,19 +2589,18 @@ def merge_dataframes(processed_sheets):
     "loan", "local", "logistic", "logistics", "ltd", "management", "marble", "marine", "market", "marketing",
     "markets", "media", "medical", "medicare",  "memorial", "merchant", "merchants", "microfinance", "ministries",
     "ministry", "mixed", "model", "monuments", "motors", "multi", "multiventures", "multivest", "municipal", "network",
-    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners", "path", "pavilion",
+    "nigeria", "nitel", "nulge", "odsg", "oil", "organization", "parish", "partners",  "pavilion",'cassava',
     "personal", "petroleum", "pharmaceuticals", "pharmacy", "plaza", "premium", "press", "pri", "primary", "product",
     "production", "products", "project", "projects", "property", "proventures", "pry", "publicity", "publish", "publisher",
     "rccg", "realtor", "rental", "research", "resources", "restaurant", "resturant", "resturants", "retiree", "road",
-    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",
-    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",
-    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",
-    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",
+    "root", "salon", "saloon", "sch", "school", "schools", "science", "secondary", "security", "service",'Bee',
+    "services", "shop", "smallchops", "society",  "solutions", "sons", "spa", "sparepart", "specialist",'ingredients','ingredient',
+    "staff", "stardo", "state", "store", "stores", "studio", "studios", "suit", "suites", "supplies",'bee keeping','keeping',
+    "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",'andycos',
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
-    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor'
-    "worldwide", "youth", "youths"
+    "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor',
+    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip'
 ]
-    
     # Extract DataFrames from processed sheets
     consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
     comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
@@ -2669,7 +2725,10 @@ def merge_dataframes(processed_sheets):
             print(f"Error during consumer concatenation: {str(e)}")
             print(f"indi columns: {list(indi.columns)}")
             print(f"indi2 columns: {list(indi2.columns)}")
-            print("Using only original individual data")
+            # If concatenation fails, at least ensure indi2 is preserved
+            if indi.empty:
+                indi = indi2.copy()
+                print("Using only extracted consumer entities as individual data")
     
     return indi, corpo
  
@@ -2862,7 +2921,7 @@ def upload_file(request):
                     cleaned_name = clean_sheet_name(sheet_name)
                     # Process sheet
                     cleaned_df = sheet_data.copy()
-                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill'], '', inplace=True)
+                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill','NA'], '', inplace=True)
 # Fix column cleaning sequence
                     cleaned_df.columns = [
                         str(col).upper().strip()  # Convert to uppercase first, then strip
