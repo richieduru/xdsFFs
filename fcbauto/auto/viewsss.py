@@ -8,13 +8,16 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render
 from .forms import ExcelUploadForm
-from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,consumer_merged,commercial_merged,CommToConsu, commercial_keywords
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,consumer_merged,commercial_merged,commercial_keywords
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n
 from datetime import datetime
 import traceback
-
+import json
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+import uuid
 
 def create_empty_sheet(mapping_dict):
     """
@@ -137,7 +140,7 @@ def remove_titles(name):
     titles = ['Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT', 
               'COL', 'LADY', 'MAJ', 'PST', 'PROF', 'REV', 'SGT',
               'SIR', 'HE', 'JUDG', 'CHF', 'ALHJ', 'APOS', 'CDR','ALH','Alh',
-              'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT','AND','and']
+              'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT']
     
     pattern = r'\b(?:' + '|'.join(re.escape(title) for title in titles) + r')\b'
     cleaned_name = re.sub(pattern, '', name, flags=re.IGNORECASE)
@@ -343,19 +346,17 @@ def remove_special_chars(text):
     return text.strip()
 
 def clean_name_preserving_special_chars(text):
-    """Clean names by replacing hyphens with spaces and removing all other special characters"""
+    """Clean names while preserving valid name-specific special characters"""
     if not text:
         return ''
     
     # Convert to string if not already
     text = str(text)
-    
-    # First replace hyphens with spaces
-    text = text.replace('-', ' ')
-    
-    # Remove all other special characters
-    text = re.sub(r'[^a-zA-Z0-9&]', ' ', text)
-    
+    # Preserve apostrophes and hyphens that are between letters (like in "O'Connor" or "Jean-Pierre")
+    text = re.sub(r"([^a-zA-Z])'([^a-zA-Z])|^'|'$", ' ', text)  # Remove standalone apostrophes
+    text = re.sub(r"([^a-zA-Z])-([^a-zA-Z])|^-|-$", ' ', text)  # Remove standalone hyphens
+    # Remove other special characters but keep spaces
+    text = re.sub(r'[^a-zA-Z\s\'\-]', '', text)
     # Replace multiple spaces with single space and strip
     text = ' '.join(text.split())
     
@@ -490,7 +491,6 @@ def rename_columns_with_fuzzy_rapidfuzz(df, mapping, threshold=90):
     df = df[list(mapping.keys())]
 
     return df
-
 def fill_data_column(df):
     """
     Fill the 'DATA' column with 'D' after column renaming
@@ -764,9 +764,9 @@ def process_special_characters(df):
                 )
             except Exception as e:
                 print(f"Error processing email column {col}: {e}")
-    
-    return df
 
+    return df
+    
 def replace_ampersands(df):
     """
     Replace all instances of '&' with 'And' across all string columns in the DataFrame
@@ -873,8 +873,6 @@ def process_identity_numbers(df):
     return df
 
 def process_tax_numbers(df):
-
-    
     # List of National Identity Number columns to process
     identity_columns = [
             'TAXID'
@@ -977,7 +975,7 @@ def process_business_id(df):
             # Keep only values that start with "RN", "BC", or "BN" (case-insensitive)
             df[col] = df[col].where(
                 # df[col].str.contains(r'(?=.*[a-zA-Z])(?=.*\d)', regex=True), 
-                df[col].str.match(r'^(rn|bc|bn)', case=False).fillna(False),
+                df[col].str.match(r'^(rn|bc|bn|rc)', case=False).fillna(False),
                 ''
             )
             
@@ -1250,6 +1248,39 @@ def process_occu(df):
             df[col] = df[col].apply(occu_title)
     
     return df
+#----------------------------------------------commented out business sector--------------------------------------------------
+# def sec_title(value):
+#     if isinstance(value, str):
+#         # Check for matching values in the dictionary
+#         for category, values in sec_dict.items():
+#             if value in values:
+#                 return category
+#         # If no match, check if the value is numeric
+#         if value.isdigit():
+#             return None  # Return None for numeric values
+#         # If the value is alphabetic, return it unchanged
+#         if value.isalpha():
+#             return value
+#     return None  # Return None for non-string types or unmatched cases
+
+# def process_business_sector(df):
+#     """Process business sector fields in the DataFrame"""
+#     # Define the business sector columns to look for
+#     sector_columns = [
+#         'BUSINESSSECTOR',
+#         # Add any other relevant column names that may appear
+#     ]
+    
+#     # Iterate through the list of potential business sector columns
+#     for col in sector_columns:
+#         if col in df.columns:
+#             # Clean the business sector values
+#             df[col] = df[col].apply(lambda x: x.lower() if isinstance(x, str) else x)
+#             df[col] = df[col].apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', x) if isinstance(x, str) else x)
+#             df[col] = df[col].apply(sec_title)
+    
+#     return df
+
 
 def map_poistioninBusiness(value):
     """Maps account status values to standardized format."""
@@ -1880,7 +1911,7 @@ def merge_individual_borrowers(consu, credit, guar):
                 fallback_merge = pd.merge(
                     indi,
                     guar_credit_merge,
-                    on='ACCOUNTNUMBER',
+                    on='ACCOUNTNUMBER',  # Match on ACCOUNTNUMBER from credit
                     how='left',
                     indicator=True
                 )
@@ -1889,8 +1920,6 @@ def merge_individual_borrowers(consu, credit, guar):
                 # Drop the extra CUSTOMERID column from credit if it exists
                 columns_to_drop = ['_merge', 'CUSTOMERID_y'] if 'CUSTOMERID_y' in fallback_merge.columns else ['_merge']
                 indi = fallback_merge.drop(columns=columns_to_drop)
-                if 'CUSTOMERID_x' in indi.columns:
-                    indi = indi.rename(columns={'CUSTOMERID_x': 'CUSTOMERID'})
                 print(f"Fallback guarantor merge completed. Final shape: {indi.shape}")
             else:
                 print("No matches found in fallback merge")
@@ -2062,7 +2091,7 @@ def remove_duplicates(df, columns_to_check=None):
 
 def is_commercial_entity(name, commercial_keywords):
     """
-    Check for commercial entities by looking at standalone words and multi-word abbreviations
+    Check for commercial entities by looking at standalone words
     
     Args:
         name (str): Full name to check
@@ -2074,46 +2103,25 @@ def is_commercial_entity(name, commercial_keywords):
     if not isinstance(name, str):
         return False
     
-    # Convert to lowercase for case-insensitive comparison
-    name_lower = name.lower()
+    # Convert to lowercase and split into words
+    name_words = set(name.lower().split())
     
-    # Convert to lowercase and split into words for single word matching
-    name_words = set(name_lower.split())
-    
-    # Convert keywords to lowercase for case-insensitive comparison
+     # Convert keywords to lowercase for case-insensitive comparison
     commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
-    
-    # 1. Check for standalone commercial keywords (word by word)
-    word_matches = [
+    # Check for standalone commercial keywords
+    commercial_matches = [
         keyword for keyword in commercial_keywords_lower
         if keyword in name_words
     ]
     
-    # 2. Check for multi-word abbreviations and phrases in the full name
-    phrase_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if ' ' in keyword and keyword in name_lower
-    ]
-    
-    # Combine all matches
-    commercial_matches = word_matches + phrase_matches
-    
     # Debug print for analysis
     if commercial_matches:
         print(f"Potential commercial entity detected: {name}")
-        print(f"Matched keywords/phrases: {commercial_matches}")
+        print(f"Matched standalone keywords: {commercial_matches}")
     
     return len(commercial_matches) > 0
 
 def split_commercial_entities(indi):
-    """Split commercial entities from individual borrowers
-    
-    Args:
-        indi (pd.DataFrame): Individual borrowers DataFrame
-    
-    Returns:
-        tuple: (Individual borrowers DataFrame, Commercial entities DataFrame)
-    """
     # Create a DataFrame to store commercial entities/
     corpo2 = pd.DataFrame(columns=indi.columns)
     
@@ -2122,45 +2130,17 @@ def split_commercial_entities(indi):
     
     # Iterate through individual borrowers to find commercial entities
     for index, row in indi.iterrows():
-        # Get values for each name column, converting to lowercase for comparison
-        surname = str(row['SURNAME']).strip() if pd.notna(row['SURNAME']) else ""
-        firstname = str(row['FIRSTNAME']).strip() if pd.notna(row['FIRSTNAME']) else ""
-        middlename = str(row['MIDDLENAME']).strip() if pd.notna(row['MIDDLENAME']) else ""
-        
-        # Create lowercase versions for comparison
-        surname_lower = surname.lower()
-        firstname_lower = firstname.lower()
-        middlename_lower = middlename.lower()
-        
-        # Create full name for entity detection
-        name_parts = [p for p in [surname, firstname, middlename] if p]
-        full_name = ' '.join(name_parts).lower()
+        # Combine name columns for checking
+        name_columns = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME']
+        full_name = ' '.join([str(row[col]).lower() for col in name_columns if pd.notna(row[col])])
         
         # Check if the name is a commercial entity
         if is_commercial_entity(full_name, commercial_keywords):
             # Prepare the row for commercial entities
             commercial_row = row.copy()
             
-            # Create a list of unique commercial entity names to avoid duplication
-            unique_commercial_parts = []
-            
-            # Check each name part individually for commercial entities
-            if surname and is_commercial_entity(surname, commercial_keywords):
-                if surname not in unique_commercial_parts:
-                    unique_commercial_parts.append(surname)
-                    
-            if firstname and is_commercial_entity(firstname, commercial_keywords):
-                if firstname not in unique_commercial_parts:
-                    unique_commercial_parts.append(firstname)
-                    
-            if middlename and is_commercial_entity(middlename, commercial_keywords):
-                if middlename not in unique_commercial_parts:
-                    unique_commercial_parts.append(middlename)
-            
-            # Use only unique commercial entity names
-            commercial_row['SURNAME'] = ' '.join(unique_commercial_parts)
-            
-            # Drop the other name columns
+            # Combine names into SURNAME, drop other name columns
+            commercial_row['SURNAME'] = f"{row['SURNAME']} {row['FIRSTNAME']} {row['MIDDLENAME']}".strip()
             commercial_row = commercial_row.drop(['FIRSTNAME', 'MIDDLENAME'])
             
             # Append to commercial entities
@@ -2176,135 +2156,6 @@ def split_commercial_entities(indi):
     print(corpo2.head())
     
     return indi, corpo2
-
-def is_consumer_entity(name, commercial_keywords):
-    """
-    Check if a business name is likely a consumer entity by confirming it 
-    doesn't contain commercial keywords or multi-word abbreviations
-    
-    Args:
-        name (str): Business name to check
-        commercial_keywords (list): List of commercial keywords
-    
-    Returns:
-        bool: True if likely a consumer entity, False otherwise
-    """
-    if name is None or not isinstance(name, str) or not name.strip():
-        return False
-    
-    # Convert to lowercase for case-insensitive comparison
-    name_lower = name.lower()
-    
-    # Convert to lowercase and split into words for single word matching
-    name_words = set(name_lower.split())
-    
-    # Convert keywords to lowercase for case-insensitive comparison
-    commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
-    
-    # 1. Check for standalone commercial keywords (word by word)
-    word_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if keyword in name_words
-    ]
-    
-    # 2. Check for multi-word abbreviations and phrases in the full name
-    phrase_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if ' ' in keyword and keyword in name_lower
-    ]
-    
-    # Combine all matches
-    commercial_matches = word_matches + phrase_matches
-    
-    # If no commercial keywords are found, it's likely a consumer entity
-    is_consumer = len(commercial_matches) == 0
-    
-    # Debug print for analysis
-    if is_consumer:
-        print(f"Potential consumer entity detected: {name}")
-    
-    return is_consumer
-
-def split_consumer_entities(corpo):
-    """Split consumer entities from corporate borrowers
-    
-    Args:
-        corpo (pd.DataFrame): Corporate borrowers DataFrame
-    
-    Returns:
-        tuple: (Corporate borrowers DataFrame, Consumer entities DataFrame)
-    """
-    # Check if BUSINESSNAME column exists in the DataFrame
-    if 'BUSINESSNAME' not in corpo.columns:
-        print("WARNING: 'BUSINESSNAME' column not found in corporate borrowers DataFrame")
-        print("Skipping consumer entity extraction")
-        # Return the original DataFrame and an empty DataFrame for indi2
-        return corpo, pd.DataFrame()
-        
-    # Create a DataFrame to store consumer entities
-    # Don't copy columns from corpo - we'll build this properly
-    indi2 = pd.DataFrame()
-    
-    # Rows to remove from corporate borrowers
-    rows_to_remove = []
-    extracted_consumers = []
-    
-    # Iterate through corporate borrowers to find consumer entities
-    for index, row in corpo.iterrows():
-        # Get business name for checking
-        if 'BUSINESSNAME' not in row or pd.isna(row['BUSINESSNAME']):
-            continue
-            
-        business_name = str(row['BUSINESSNAME']).strip()
-        
-        # Check if the business name is a consumer entity
-        if is_consumer_entity(business_name, commercial_keywords):
-            # Create a new consumer row from the corporate row
-            consumer_data = {}
-            
-            # Copy all data from the corporate row except BUSINESSNAME
-            for col in row.index:
-                if col != 'BUSINESSNAME':
-                    consumer_data[col] = row[col]
-            
-            # Split the business name into name parts
-            name_parts = business_name.split()
-            
-            # Assign name parts to appropriate fields
-            if len(name_parts) >= 1:
-                consumer_data['SURNAME'] = name_parts[0]
-                
-                if len(name_parts) >= 2:
-                    consumer_data['FIRSTNAME'] = name_parts[1]
-                else:
-                    consumer_data['FIRSTNAME'] = ''
-                    
-                if len(name_parts) >= 3:
-                    consumer_data['MIDDLENAME'] = ' '.join(name_parts[2:])
-                else:
-                    consumer_data['MIDDLENAME'] = ''
-            
-            # Add DEPENDANTS column with '00' value
-            consumer_data['DEPENDANTS'] = '00'
-            
-            # Add to extracted consumers list
-            extracted_consumers.append(consumer_data)
-            rows_to_remove.append(index)
-    
-    # Convert extracted consumers to DataFrame if any were found
-    if extracted_consumers:
-        indi2 = pd.DataFrame(extracted_consumers)
-        print(f"Ensured DEPENDANTS column is populated with '00' for {len(indi2)} extracted consumer records")
-    
-    # Remove identified consumer entities from corporate borrowers
-    corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
-    
-    # Debug prints
-    print("Number of consumer entities found:", len(indi2))
-    print("First few consumer entities:")
-    print(indi2.head())
-    
-    return corpo, indi2
 
 def merge_dataframes(processed_sheets):
     """
@@ -2343,74 +2194,9 @@ def merge_dataframes(processed_sheets):
                 print("\nRenaming columns for extracted commercial entities...")
                 corpo2 = rename_columns(corpo2, ConsuToComm.copy())
                 
-                # Ensure both dataframes have reset indexes
-                if not corpo.empty:
-                    corpo = corpo.reset_index(drop=True)
-                corpo2 = corpo2.reset_index(drop=True)
-                
                 print("\nConcatenating extracted commercial entities with corporate data...")
-                try:
-                    # If corpo is empty, just use corpo2
-                    if corpo.empty:
-                        corpo = corpo2
-                        print(f"  - Using extracted commercial entities as corporate data: {len(corpo)} rows")
-                    else:
-                        # Use columns parameter to ensure concatenation uses only columns from mapping
-                        common_columns = [col for col in corpo2.columns if col in corpo.columns]
-                        if not common_columns:
-                            # If no common columns, use all columns from corpo2
-                            corpo = pd.concat([corpo, corpo2], ignore_index=True, sort=False)
-                        else:
-                            corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
-                        print(f"  - Total corporate records after concatenation: {len(corpo)}")
-                except Exception as e:
-                    print(f"Error during commercial concatenation: {e}")
-                    print(f"corpo columns: {list(corpo.columns)}")
-                    print(f"corpo2 columns: {list(corpo2.columns)}")
-                    # If concatenation fails, at least ensure corpo2 is preserved
-                    if corpo.empty:
-                        corpo = corpo2.copy()
-                        print("Using only extracted commercial entities as corporate data")
-        
-        # Split consumer entities from the commercial_merged data
-        if not corpo.empty:
-            print("\nSplitting consumer entities from commercial_merged data...")
-            corpo, indi2 = split_consumer_entities(corpo)
-            print(f"  - Corporate records after split: {len(corpo)}")
-            print(f"  - Consumer entities extracted: {len(indi2)}")
-
-            # Rename and concatenate if consumer entities were found
-            if not indi2.empty:
-                print("\nRenaming columns for extracted consumer entities...")
-                # Apply the CommToConsu mapping to rename columns and strictly order them
-                indi2 = rename_columns(indi2, CommToConsu.copy())
-                
-                # Ensure both dataframes have reset indexes
-                indi = indi.reset_index(drop=True)
-                indi2 = indi2.reset_index(drop=True)
-                
-                print("\nConcatenating extracted consumer entities with individual data...")
-                try:
-                    # If indi is empty, just use indi2
-                    if indi.empty:
-                        indi = indi2
-                        print(f"  - Using extracted consumer entities as individual data: {len(indi)} rows")
-                    else:
-                        # Ensure both dataframes have the same column ordering by applying the same mapping
-                        indi = rename_columns(indi, CommToConsu.copy())
-                        indi2 = rename_columns(indi2, CommToConsu.copy())
-                        
-                        # Direct concatenation without filtering to common columns
-                        indi = pd.concat([indi, indi2], ignore_index=True, sort=False)
-                        print(f"Total individual borrowers after concatenation: {len(indi)}")
-                except Exception as e:
-                    print(f"Error during consumer concatenation: {str(e)}")
-                    print(f"indi columns: {list(indi.columns)}")
-                    print(f"indi2 columns: {list(indi2.columns)}")
-                    # If concatenation fails, at least ensure indi2 is preserved
-                    if indi.empty:
-                        indi = indi2.copy()
-                        print("Using only extracted consumer entities as individual data")
+                corpo = pd.concat([corpo, corpo2], ignore_index=True)
+                print(f"  - Total corporate records after concatenation: {len(corpo)}")
         # --- End Added Processing ---
                 
         print("\n=== FINAL MERGED SHEET DATA ===")
@@ -2419,7 +2205,8 @@ def merge_dataframes(processed_sheets):
         
         return indi, corpo
 
-    # Regular processing for non-merged sheets
+
+    
     # Extract DataFrames from processed sheets
     consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
     comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
@@ -2466,120 +2253,44 @@ def merge_dataframes(processed_sheets):
         print("First few rows of corpo2:")
         print(corpo2.head())
         
-        # Ensure both dataframes have reset indexes
-        corpo = corpo.reset_index(drop=True)
-        corpo2 = corpo2.reset_index(drop=True)
-        
         # Combine commercial entities with existing corporate borrowers
-        try:
-            # If corpo is empty, just use corpo2
-            if corpo.empty:
-                corpo = corpo2
-                print(f"Using extracted commercial entities as corporate data: {len(corpo)} rows")
-            else:
-                # Apply ConsuToComm mapping to ensure columns are aligned
-                corpo2 = rename_columns(corpo2, ConsuToComm.copy())
-                
-                # Direct concatenation without filtering to common columns
-                corpo = pd.concat([corpo, corpo2], ignore_index=True, sort=False)
-                print(f"Total corporate borrowers after concatenation: {len(corpo)}")
-        except Exception as e:
-            print(f"Error during commercial concatenation: {e}")
-            print(f"corpo columns: {list(corpo.columns)}")
-            print(f"corpo2 columns: {list(corpo2.columns)}")
-            # If concatenation fails, at least ensure corpo2 is preserved
-            if corpo.empty:
-                corpo = corpo2.copy()
-                print("Using only extracted commercial entities as corporate data")
+        corpo = pd.concat([corpo, corpo2], ignore_index=True)
+        
+        # Debug statement to confirm addition
+        print("\nAfter Adding Commercial Entities:")
+        print("Total corporate borrowers:", len(corpo))
+        print("Columns in final corpo:", corpo.columns)
+        print("First few rows after addition:")
+        print(corpo.head())
 
         # Additional check to verify commercial entities were added
-        commercial_entities_in_corpo = pd.DataFrame()
-        if 'BUSINESSNAME' in corpo.columns:
-            commercial_entities_in_corpo = corpo[
-                corpo['BUSINESSNAME'].apply(
-                    lambda x: any(keyword in str(x).lower() for keyword in commercial_keywords)
-                )
-            ]
-            print("\nCommercial Entities in Final Corporate Borrowers:")
-            print("Number of commercial entities:", len(commercial_entities_in_corpo))
-            print("First few commercial entities:")
-            print(commercial_entities_in_corpo.head())
-        else:
-            print("\nWARNING: 'BUSINESSNAME' column not found in corporate DataFrame")
-            print("Cannot identify commercial entities in corporate borrowers")
-    
-    # Step 5: Split consumer entities from corporate borrowers
-    corpo, indi2 = split_consumer_entities(corpo)
-    
-    print("\n=== SPLIT CONSUMER ENTITIES ===")
-    print("Corporate records after split:", len(corpo))
-    print("Consumer entities extracted:", len(indi2))
-    
-    # Step 6: Rename consumer entities before combining
-    if not indi2.empty:
-        # Rename indi2 columns to match individual borrower template
-        print("\nRenaming columns for extracted consumer entities...")
-        indi2 = rename_columns(indi2, CommToConsu.copy())
-        
-        # Debug statement to show indi2 details before concatenation
-        print("Number of consumer entities:", len(indi2))
-        print("First few rows of indi2:")
-        print(indi2.head())
-        
-        # Ensure both dataframes have reset indexes
-        indi = indi.reset_index(drop=True)
-        indi2 = indi2.reset_index(drop=True)
-        
-        # Combine consumer entities with existing individual borrowers
-        try:
-            # If indi is empty, just use indi2
-            if indi.empty:
-                indi = indi2
-                print(f"Using extracted consumer entities as individual data: {len(indi)} rows")
-            else:
-                # Ensure indi has the same column ordering as CommToConsu
-                indi = rename_columns(indi, CommToConsu.copy())
-                
-                # Now both dataframes have exactly the same columns in the same order,
-                # we can safely concatenate them
-                indi = pd.concat([indi, indi2], ignore_index=True)
-                print(f"Total individual records after concatenation: {len(indi)}")
-                    
-            # Debug statement to confirm addition
-            print("\nAfter Adding Consumer Entities:")
-            print("Total individual borrowers:", len(indi))
-            print("Columns in final indi:", list(indi.columns[:10]) + ["..."])  # Show first 10 columns
-            print("First few rows after addition:")
-            print(indi.head())
-        except Exception as e:
-            print(f"Error during consumer concatenation: {str(e)}")
-            print(f"indi columns: {list(indi.columns)}")
-            print(f"indi2 columns: {list(indi2.columns)}")
-            # If concatenation fails, at least ensure indi2 is preserved
-            if indi.empty:
-                indi = indi2.copy()
-                print("Using only extracted consumer entities as individual data")
+        commercial_entities_in_corpo = corpo[
+            corpo['BUSINESSNAME'].apply(
+                lambda x: any(keyword in str(x).lower() for keyword in commercial_keywords)
+            )
+        ]
+        print("\nCommercial Entities in Final Corporate Borrowers:")
+        print("Number of commercial entities:", len(commercial_entities_in_corpo))
+        print("First few commercial entities:")
+        print(commercial_entities_in_corpo.head())
     
     return indi, corpo
  
 def rename_columns(df, column_mapping):
     """
-    Rename columns based on a mapping dictionary and strictly enforce column order
+    Rename columns based on a mapping dictionary
     
     Args:
         df (pd.DataFrame): Input DataFrame
         column_mapping (dict): Mapping of column names
     
     Returns:
-        pd.DataFrame: DataFrame with renamed columns and ordered according to mapping
+        pd.DataFrame: DataFrame with renamed columns
     """
     try:
-        # Create a fresh copy of the dataframe to avoid modifying the original
-        df = df.copy()
-        
         # Print original columns before renaming
         print("Original columns before renaming:", list(df.columns))
-        print("Mapping dictionary has", len(column_mapping), "keys")
+        print("Mapping being used:", column_mapping)
 
         # Rename columns that match the mapping
         for column in list(df.columns):  # Use list() to create a copy of columns
@@ -2592,61 +2303,26 @@ def rename_columns(df, column_mapping):
         # Print columns after initial renaming
         print("Columns after renaming:", list(df.columns))
 
-        # Check for duplicate columns and make them unique
-        if len(df.columns) != len(set(df.columns)):
-            print("WARNING: Duplicate column names detected, making them unique...")
-            # Create a new columns list without duplicates
-            seen = set()
-            new_columns = []
-            for col in df.columns:
-                if col not in seen:
-                    seen.add(col)
-                    new_columns.append(col)
-                else:
-                    # For duplicates, add a suffix
-                    i = 1
-                    while f"{col}_{i}" in seen:
-                        i += 1
-                    seen.add(f"{col}_{i}")
-                    new_columns.append(f"{col}_{i}")
-            
-            # Assign the new unique column names
-            df.columns = new_columns
+        # Add missing columns from the dictionary
+        for mapped_column in column_mapping.keys():
+            if mapped_column not in df.columns:
+                df[mapped_column] = None
+                print(f"Added missing column: {mapped_column}")
         
         # Print columns before final reordering
         print("Columns before reordering:", list(df.columns))
 
-        # Create ordered DataFrame using concat instead of adding columns one by one
-        # This avoids DataFrame fragmentation warning
-        column_dfs = []
-        for col in column_mapping.keys():
-            if col in df.columns:
-                # For existing columns, use the values from the original DataFrame
-                column_dfs.append(pd.DataFrame({col: df[col]}))
-            else:
-                # For missing columns, create a new DataFrame with None values
-                column_dfs.append(pd.DataFrame({col: [None] * len(df)}))
-        
-        # Use concat to join all columns at once
-        if column_dfs:
-            ordered_df = pd.concat(column_dfs, axis=1)
-        else:
-            # If no columns were found, create an empty DataFrame with the right columns
-            ordered_df = pd.DataFrame(columns=list(column_mapping.keys()))
-        
-        # Reset index to ensure clean index for concatenation
-        ordered_df = ordered_df.reset_index(drop=True)
+        # Reorder the columns based on the keys in the dictionary
+        df = df[list(column_mapping.keys())]
         
         # Print final columns
-        print("Final columns after strict reordering:", list(ordered_df.columns))
-        print(f"Final dataframe has {len(ordered_df.columns)} columns and {len(ordered_df)} rows")
+        print("Final columns after reordering:", list(df.columns))
 
-        return ordered_df
+        return df
     except Exception as e:
         print(f"Error in rename_columns: {e}")
         traceback.print_exc()
         return df
-
 
 def modify_middle_names(df):
     """Keep only the first name in the specified middle name columns."""
@@ -2678,11 +2354,7 @@ def trim_strings_to_59(df):
         if isinstance(s, str) and len(s) > 59:
             return s[:58]  # Trim to 58 characters as requested
         return s
-    
-    # Apply the function to all elements in the DataFrame
-    print("\n=== TRIMMING STRING VALUES TO 59 CHARACTERS ===")
     df = df.applymap(trim_string)
-    print("String trimming completed")
     
     return df
 
@@ -2751,10 +2423,10 @@ def upload_file(request):
                     cleaned_name = clean_sheet_name(sheet_name)
                     # Process sheet
                     cleaned_df = sheet_data.copy()
-                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill','NA'], '', inplace=True)
+                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill'], '', inplace=True)
 # Fix column cleaning sequence
                     cleaned_df.columns = [
-                        str(col).upper().strip()  # Convert to uppercase first, then strip
+                        str(col).upper().strip()  # Ensure column names are strings first
                         for col in cleaned_df.columns
                     ]
                     cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
@@ -2846,7 +2518,9 @@ def upload_file(request):
                 indi = remove_duplicates(indi)
                 corpo = remove_duplicates(corpo)
 
-                
+                # Trim strings to 59 characters
+                # indi = trim_strings_to_59(indi)
+                # corpo = trim_strings_to_59(corpo)
 
                 total_individual_records = len(indi) if not indi.empty else 0
                 total_corporate_records = len(corpo) if not corpo.empty else 0
@@ -2960,4 +2634,3 @@ def upload_file(request):
         form = ExcelUploadForm()
     
     return render(request, 'upload.html', {'form': form})
-
