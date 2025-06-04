@@ -225,6 +225,8 @@ def convert_date(date_string):
         # Excel serial date base is 1899-12-30
         base_date = datetime(1899, 12, 30)
         calculated_date = base_date + timedelta(days=int(serial_number))
+        if calculated_date.year < 1900:
+            return None
         return f"{calculated_date.year:04d}{calculated_date.month:02d}{calculated_date.day:02d}"
     except (ValueError, TypeError):
         # If not a valid number, proceed with parsing as a string
@@ -248,6 +250,8 @@ def convert_date(date_string):
     for fmt in four_digit_year_formats:
         try:
             date = datetime.strptime(str(date_string).strip(), fmt)
+            if date.year < 1900:
+                return None
             return f"{date.year:04d}{date.month:02d}{date.day:02d}"
         except ValueError:
             continue
@@ -266,6 +270,8 @@ def convert_date(date_string):
             
             # Replace the year while keeping month/day the same
             date = date.replace(year=adjusted_year)
+            if date.year < 1900:
+                return None
             return f"{date.year:04d}{date.month:02d}{date.day:02d}"
         except ValueError:
             continue
@@ -274,6 +280,8 @@ def convert_date(date_string):
     try:
         date = dateparser.parse(str(date_string))
         if date:
+            if date.year < 1900:
+                return None
             return f"{date.year:04d}{date.month:02d}{date.day:02d}"
     except:
         pass
@@ -447,8 +455,11 @@ def rename_columns_with_fuzzy_rapidfuzz(df, mapping, threshold=90):
     # Create a mapping to track which keys have been used
     used_keys_mapping = {key: None for key in mapping}
 
+    # Collect columns to drop due to conflicts
+    columns_to_drop = []
+
     # Iterate over the columns and rename them
-    for column in df.columns:
+    for column in list(df.columns):  # Use list to avoid issues when dropping columns
         found_match = False
         for mapped_column, alt_names in mapping.items():
             # Check if the key has been used
@@ -457,10 +468,15 @@ def rename_columns_with_fuzzy_rapidfuzz(df, mapping, threshold=90):
 
             # Check if the column name is in alt_names
             if column.lower() in alt_names or column.upper() in alt_names or column == mapped_column:
-                df.rename(columns={column: mapped_column}, inplace=True)
-                renamed_columns.add(mapped_column)
-                used_keys_mapping[mapped_column] = column
-                print(f"Renamed {column} to {mapped_column}")
+                # Check for key conflict: if mapped_column already exists in df.columns (and is not the current column)
+                if mapped_column in df.columns and column != mapped_column:
+                    columns_to_drop.append(column)
+                    print(f"Column {column} dropped due to key conflict with {mapped_column}.")
+                else:
+                    df.rename(columns={column: mapped_column}, inplace=True)
+                    renamed_columns.add(mapped_column)
+                    used_keys_mapping[mapped_column] = column
+                    print(f"Renamed {column} to {mapped_column}")
                 found_match = True
                 break
 
@@ -468,16 +484,22 @@ def rename_columns_with_fuzzy_rapidfuzz(df, mapping, threshold=90):
         if not found_match:
             fuzzy_match_result = fuzzy_match(column, mapping.keys())
             if fuzzy_match_result:
-                # Check if the key has been used
-                if used_keys_mapping[fuzzy_match_result] is None:
+                # Check for key conflict: if fuzzy_match_result already exists in df.columns (and is not the current column)
+                if fuzzy_match_result in df.columns and column != fuzzy_match_result:
+                    columns_to_drop.append(column)
+                    print(f"Column {column} dropped due to key conflict with {fuzzy_match_result} (fuzzy match).")
+                elif used_keys_mapping[fuzzy_match_result] is None:
                     df.rename(columns={column: fuzzy_match_result}, inplace=True)
                     renamed_columns.add(fuzzy_match_result)
                     used_keys_mapping[fuzzy_match_result] = column
                     print(f"Fuzzy matched {column} to {fuzzy_match_result}")
                 else:
-                    # Drop the column if a fuzzy match has already been used
-                    df.drop(columns=[column], inplace=True)
-                    print(f"Column {column} dropped due to key conflict.")
+                    columns_to_drop.append(column)
+                    print(f"Column {column} dropped due to key conflict (fuzzy match already used).")
+
+    # Drop all columns that were marked for dropping
+    if columns_to_drop:
+        df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 
     # Drop duplicate columns
     df = df.loc[:, ~df.columns.duplicated()]
@@ -485,6 +507,11 @@ def rename_columns_with_fuzzy_rapidfuzz(df, mapping, threshold=90):
     # Add columns for keys that were not mapped
     new_columns = {key: None for key, used_column in used_keys_mapping.items() if used_column is None}
     df = pd.concat([df, pd.DataFrame(new_columns, index=df.index)], axis=1)
+
+    # Ensure all mapping keys are present as columns
+    for key in mapping.keys():
+        if key not in df.columns:
+            df[key] = None
 
     # Reorder the columns based on the keys in the dictionary
     df = df[list(mapping.keys())]
@@ -977,7 +1004,7 @@ def process_business_id(df):
             # Keep only values that start with "RN", "BC", or "BN" (case-insensitive)
             df[col] = df[col].where(
                 # df[col].str.contains(r'(?=.*[a-zA-Z])(?=.*\d)', regex=True), 
-                df[col].str.match(r'^(rn|bc|bn)', case=False).fillna(False),
+                df[col].str.match(r'^(rn|bc|bn|rc)', case=False).fillna(False),
                 ''
             )
             
@@ -2062,7 +2089,7 @@ def remove_duplicates(df, columns_to_check=None):
 
 def is_commercial_entity(name, commercial_keywords):
     """
-    Check for commercial entities by looking at standalone words and multi-word abbreviations
+    Check for commercial entities by looking at standalone words
     
     Args:
         name (str): Full name to check
@@ -2074,46 +2101,25 @@ def is_commercial_entity(name, commercial_keywords):
     if not isinstance(name, str):
         return False
     
-    # Convert to lowercase for case-insensitive comparison
-    name_lower = name.lower()
-    
-    # Convert to lowercase and split into words for single word matching
-    name_words = set(name_lower.split())
+    # Convert to lowercase and split into words
+    name_words = set(name.lower().split())
     
     # Convert keywords to lowercase for case-insensitive comparison
     commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
-    
-    # 1. Check for standalone commercial keywords (word by word)
-    word_matches = [
+    # Check for standalone commercial keywords
+    commercial_matches = [
         keyword for keyword in commercial_keywords_lower
         if keyword in name_words
     ]
     
-    # 2. Check for multi-word abbreviations and phrases in the full name
-    phrase_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if ' ' in keyword and keyword in name_lower
-    ]
-    
-    # Combine all matches
-    commercial_matches = word_matches + phrase_matches
-    
     # Debug print for analysis
     if commercial_matches:
         print(f"Potential commercial entity detected: {name}")
-        print(f"Matched keywords/phrases: {commercial_matches}")
+        print(f"Matched standalone keywords: {commercial_matches}")
     
     return len(commercial_matches) > 0
 
 def split_commercial_entities(indi):
-    """Split commercial entities from individual borrowers
-    
-    Args:
-        indi (pd.DataFrame): Individual borrowers DataFrame
-    
-    Returns:
-        tuple: (Individual borrowers DataFrame, Commercial entities DataFrame)
-    """
     # Create a DataFrame to store commercial entities/
     corpo2 = pd.DataFrame(columns=indi.columns)
     
@@ -2122,45 +2128,17 @@ def split_commercial_entities(indi):
     
     # Iterate through individual borrowers to find commercial entities
     for index, row in indi.iterrows():
-        # Get values for each name column, converting to lowercase for comparison
-        surname = str(row['SURNAME']).strip() if pd.notna(row['SURNAME']) else ""
-        firstname = str(row['FIRSTNAME']).strip() if pd.notna(row['FIRSTNAME']) else ""
-        middlename = str(row['MIDDLENAME']).strip() if pd.notna(row['MIDDLENAME']) else ""
-        
-        # Create lowercase versions for comparison
-        surname_lower = surname.lower()
-        firstname_lower = firstname.lower()
-        middlename_lower = middlename.lower()
-        
-        # Create full name for entity detection
-        name_parts = [p for p in [surname, firstname, middlename] if p]
-        full_name = ' '.join(name_parts).lower()
+        # Combine name columns for checking
+        name_columns = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME']
+        full_name = ' '.join([str(row[col]).lower() for col in name_columns if pd.notna(row[col])])
         
         # Check if the name is a commercial entity
         if is_commercial_entity(full_name, commercial_keywords):
             # Prepare the row for commercial entities
             commercial_row = row.copy()
             
-            # Create a list of unique commercial entity names to avoid duplication
-            unique_commercial_parts = []
-            
-            # Check each name part individually for commercial entities
-            if surname and is_commercial_entity(surname, commercial_keywords):
-                if surname not in unique_commercial_parts:
-                    unique_commercial_parts.append(surname)
-                    
-            if firstname and is_commercial_entity(firstname, commercial_keywords):
-                if firstname not in unique_commercial_parts:
-                    unique_commercial_parts.append(firstname)
-                    
-            if middlename and is_commercial_entity(middlename, commercial_keywords):
-                if middlename not in unique_commercial_parts:
-                    unique_commercial_parts.append(middlename)
-            
-            # Use only unique commercial entity names
-            commercial_row['SURNAME'] = ' '.join(unique_commercial_parts)
-            
-            # Drop the other name columns
+            # Combine names into SURNAME, drop other name columns
+            commercial_row['SURNAME'] = f"{row['SURNAME']} {row['FIRSTNAME']} {row['MIDDLENAME']}".strip()
             commercial_row = commercial_row.drop(['FIRSTNAME', 'MIDDLENAME'])
             
             # Append to commercial entities
@@ -2177,63 +2155,28 @@ def split_commercial_entities(indi):
     
     return indi, corpo2
 
-def is_consumer_entity(name, commercial_keywords):
+def is_consumer_entity(name, commercial_keywords, threshold=90):
     """
-    Check if a business name is likely a consumer entity by confirming it 
-    doesn't contain commercial keywords or multi-word abbreviations
-    
-    Args:
-        name (str): Business name to check
-        commercial_keywords (list): List of commercial keywords
-    
-    Returns:
-        bool: True if likely a consumer entity, False otherwise
+    Check if a business name is likely a consumer entity by confirming it doesn't contain (fuzzy) commercial keywords as standalone words.
+    Uses fuzzy matching for standalone words only.
     """
     if name is None or not isinstance(name, str) or not name.strip():
         return False
     
-    # Convert to lowercase for case-insensitive comparison
-    name_lower = name.lower()
-    
     # Convert to lowercase and split into words for single word matching
-    name_words = set(name_lower.split())
-    
-    # Convert keywords to lowercase for case-insensitive comparison
+    name_words = set(name.lower().split())
     commercial_keywords_lower = [keyword.lower() for keyword in commercial_keywords]
     
-    # 1. Check for standalone commercial keywords (word by word)
-    word_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if keyword in name_words
-    ]
-    
-    # 2. Check for multi-word abbreviations and phrases in the full name
-    phrase_matches = [
-        keyword for keyword in commercial_keywords_lower
-        if ' ' in keyword and keyword in name_lower
-    ]
-    
-    # Combine all matches
-    commercial_matches = word_matches + phrase_matches
-    
-    # If no commercial keywords are found, it's likely a consumer entity
-    is_consumer = len(commercial_matches) == 0
-    
-    # Debug print for analysis
-    if is_consumer:
-        print(f"Potential consumer entity detected: {name}")
-    
-    return is_consumer
+    # Fuzzy match: only match if a word in the business name is a fuzzy match to a commercial keyword
+    for word in name_words:
+        for keyword in commercial_keywords_lower:
+            if fuzz.ratio(word, keyword) >= threshold:
+                # If the word is a fuzzy match to a commercial keyword, it's not a consumer entity
+                return False
+    return True
 
 def split_consumer_entities(corpo):
-    """Split consumer entities from corporate borrowers
-    
-    Args:
-        corpo (pd.DataFrame): Corporate borrowers DataFrame
-    
-    Returns:
-        tuple: (Corporate borrowers DataFrame, Consumer entities DataFrame)
-    """
+    """Split consumer entities from corporate borrowers using fuzzy standalone word match for commercial keywords"""
     # Check if BUSINESSNAME column exists in the DataFrame
     if 'BUSINESSNAME' not in corpo.columns:
         print("WARNING: 'BUSINESSNAME' column not found in corporate borrowers DataFrame")
@@ -2242,7 +2185,6 @@ def split_consumer_entities(corpo):
         return corpo, pd.DataFrame()
         
     # Create a DataFrame to store consumer entities
-    # Don't copy columns from corpo - we'll build this properly
     indi2 = pd.DataFrame()
     
     # Rows to remove from corporate borrowers
@@ -2254,56 +2196,43 @@ def split_consumer_entities(corpo):
         # Get business name for checking
         if 'BUSINESSNAME' not in row or pd.isna(row['BUSINESSNAME']):
             continue
-            
         business_name = str(row['BUSINESSNAME']).strip()
-        
-        # Check if the business name is a consumer entity
+        # Check if the business name is a consumer entity (using fuzzy standalone word match)
         if is_consumer_entity(business_name, commercial_keywords):
             # Create a new consumer row from the corporate row
             consumer_data = {}
-            
             # Copy all data from the corporate row except BUSINESSNAME
             for col in row.index:
                 if col != 'BUSINESSNAME':
                     consumer_data[col] = row[col]
-            
             # Split the business name into name parts
             name_parts = business_name.split()
-            
             # Assign name parts to appropriate fields
             if len(name_parts) >= 1:
                 consumer_data['SURNAME'] = name_parts[0]
-                
                 if len(name_parts) >= 2:
                     consumer_data['FIRSTNAME'] = name_parts[1]
                 else:
                     consumer_data['FIRSTNAME'] = ''
-                    
                 if len(name_parts) >= 3:
                     consumer_data['MIDDLENAME'] = ' '.join(name_parts[2:])
                 else:
                     consumer_data['MIDDLENAME'] = ''
-            
             # Add DEPENDANTS column with '00' value
             consumer_data['DEPENDANTS'] = '00'
-            
             # Add to extracted consumers list
             extracted_consumers.append(consumer_data)
             rows_to_remove.append(index)
-    
     # Convert extracted consumers to DataFrame if any were found
     if extracted_consumers:
         indi2 = pd.DataFrame(extracted_consumers)
         print(f"Ensured DEPENDANTS column is populated with '00' for {len(indi2)} extracted consumer records")
-    
     # Remove identified consumer entities from corporate borrowers
     corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
-    
     # Debug prints
     print("Number of consumer entities found:", len(indi2))
     print("First few consumer entities:")
     print(indi2.head())
-    
     return corpo, indi2
 
 def merge_dataframes(processed_sheets):
