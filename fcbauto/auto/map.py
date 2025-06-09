@@ -94,7 +94,7 @@ credit_mapping = {
         'DAYSINARREARS': ['daysinarrears','daysoverdue','monthsinarrears','dpdinmonths','montharrears','monthsarrears','daysoverdue','numberofdaysoverduemicrocreditfacility','daysinarrears','daysinarrears','numberofdaysoverduemicrocreditfacility','noofdaysoverdue','numberofdaysoverdue','daysareas','overduedaysprin'],
         'OVERDUEAMOUNT': ['overdueamount','overdueamtprn','amountoverdue','amountoverduearrearsamount','overdue'],
         'FACILITYTYPE': ['product','loantype','loanfacilitytype','accounttype','facilitytype','type','accounttypecode','typeofaccount','mortgagefacilitytype','customercategory','loanfacilitytype','transactiontypecode','schmtype','creditfacilitytype'],
-        'FACILITYTENOR': ['loantenor','loanfacilitytenormonths','loan tenor','loanfacilitytenor','term','loan facility tenor','facility tenor','facilitytenor','FACILITYTENOR','LOAN (FACILITY) TENOR','LOAN DURATION','LOAN DURATION DAYS','LOAN_DURATION','TENORINDAYS','LOAN FACILITY TENOR','LOANDURATION','TERM','LOAN TENOR','LOAN DURATION (DAYS)','FACILITY TENOR','LOAN_TENOR','TENOR'],
+        'FACILITYTENOR': ['loantenor','loanfacilitytenormonths','loanfacilitytenorweeks','loan tenor','loanfacilitytenor','term','loan facility tenor','facility tenor','facilitytenor','FACILITYTENOR','LOAN (FACILITY) TENOR','LOAN DURATION','LOAN DURATION DAYS','LOAN_DURATION','TENORINDAYS','LOAN FACILITY TENOR','LOANDURATION','TERM','LOAN TENOR','LOAN DURATION (DAYS)','FACILITY TENOR','LOAN_TENOR','TENOR'],
         'FACILITYOWNERSHIPTYPE':['FACILITYOWNERSHIPTYPE'],
         'REPAYMENTFREQUENCY': ['repaymentfreq','repaymentfrequency','repayment frequency','REPAYMENTFREQUENCY','REPAYMENT FREQUENCY','REPAY FREQUENCY','FREQUENCY','REPAYMENT_FREQUENCY','REPAY_FREQ','PRINCIPAL REPAYMENT FREQUENCY','INTERESTFREQTYPE','INSTALLMENT_FREQUENCY','LR_FREQ_TYPE','RPYM_FREQ'],
         'LASTPAYMENTDATE': ['lastpaymentdate','last payment date','LASTPAYMENTDATE','LAST PAYMENT DATE','LAST PAYMENT RECEIVED DATE','DATE LAST PYMT WAS RCVD','PAYMENT DATE','LATEST_PAYMENT_DATE','LAST_TRANSACTION_DATE','LAST_PAYMT_DT_PRN','LAST_PAYMENT','LASTINTERESTPAIDDATE','DATE LATEST PAYMENT RECEIVED','LASTREPAYMENTDTE','LASTREPAYMENTDATE','LAST_PAYMENT_DATE','LAST_TRAN_DATE','DATE ON WHICH LAST PAYMENT WAS RECEIVED','LAST_DATE','LAST_INT_REC_DATE','LAST_INSTALMENT_DATE','DATELASTPAYMENTRECEIVED'],
@@ -1190,7 +1190,7 @@ ConsuToComm={
     'PREVIOUSNAME':['PREVIOUSNAME'],
     'PREVIOUSCUSTOMERID':['PREVIOUSCUSTOMERID'],
     'PREVIOUSBRANCHCODE':['PREVIOUSBRANCHCODE'],
-    'NUMBEROFDIRECTORS' : [''],
+    'NUMBEROFDIRECTORS':[''],
     'PRINCIPALOFFICER1SURNAME':['INDIVIDUALGUARANTORSURNAME'],
     'PRINCIPALOFFICER1FIRSTNAME':['INDIVIDUALGUARANTORFIRSTNAME'],
     'PRINCIPALOFFICER1MIDDLENAME':['INDIVIDUALGUARNTORMIDDLENAME'],
@@ -1228,6 +1228,7 @@ ConsuToComm={
     'PRINCIPALOFFICER2EMAILADDRESS':[''],
     'PRINCIPALOFFICER2POSITIONINBUSINESS':['']}
 
+    
 CommToConsu={'DATA':['DATA'],
  'CUSTOMERID':['CUSTOMERID'],
  'BRANCHCODE':['CUSTOMERBRANCHCODE'],
@@ -1425,5 +1426,5 @@ commercial_keywords = [
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",'andycos',
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
     "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor',
-    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip','limikted','astroturf','mfb','catho','coopsociety','tradomedical','interbiz','greens'
+    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip','limikted','astroturf','mfb','catho','coopsociety','tradomedical','interbiz','greens','woodwork','woodworks','woodwork'
 ]

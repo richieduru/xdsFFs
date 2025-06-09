@@ -14,6 +14,8 @@ from typing import Union, Optional
 from word2number import w2n
 from datetime import datetime
 import traceback
+from django.views.decorators.csrf import csrf_exempt
+import json
 
 
 def create_empty_sheet(mapping_dict):
@@ -97,6 +99,48 @@ def ensure_all_sheets_exist(xds):
     
     return processed_sheets
 
+def preprocess_tenor_from_headers(df):
+    """
+    Checks column headers for time units (e.g., 'Loan Tenor (Months)')
+    and converts the data in that column to days. This version handles
+    days, weeks, months, and years.
+    """
+    df_copy = df.copy()
+    
+    # --- UPDATED: Comprehensive dictionary for all units ---
+    header_unit_multipliers = {
+        # Days
+        'days': 1, 'day': 1, 'd': 1, 'dys': 1,
+        # Weeks
+        'weeks': 7, 'week': 7, 'w': 7,
+        # Months
+        'months': 30, 'month': 30, 'mnth': 30, 'mth': 30, 
+        'mths': 30, 'mnths': 30, 'mons': 30, 'm': 30,
+        # Years
+        'years': 365, 'year': 365, 'y': 365, 'yr': 365, 'yrs': 365,
+    }
+
+    # Regex to find any of the units in the dictionary, ignoring case
+    # This looks for the unit as a whole word
+    pattern = r'\b(' + '|'.join(header_unit_multipliers.keys()) + r')\b'
+
+    for col in df_copy.columns:
+        # Search for a unit in the column name (case-insensitive)
+        match = re.search(pattern, col, re.IGNORECASE)
+        
+        if match:
+            unit_found = match.group(0).lower()
+            multiplier = header_unit_multipliers[unit_found]
+            
+            print(f"Found unit '{unit_found}' in header '{col}'. Applying multiplier: {multiplier}")
+            
+            # Apply the multiplier to the column.
+            # pd.to_numeric converts numbers; errors='coerce' handles non-numbers gracefully.
+            # .fillna(0) replaces any conversion errors with 0.
+            numeric_col = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
+            df_copy[col] = numeric_col * multiplier
+    
+    return df_copy
 
 def clean_sheet_name(sheet_name):
     """Clean sheet names by removing special characters"""
@@ -1676,7 +1720,8 @@ def process_loan_tenor(df):
 
             df[col] = df[col].apply(convert_tenor_to_days)
             # Convert to numeric, handling any conversion errors
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+            numeric_series = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            df[col] = np.ceil(numeric_series).astype(int)
             df[col] = df[col].astype(str)
         else:
             print(f"Column {col} not found in DataFrame.")
@@ -2140,13 +2185,21 @@ def split_commercial_entities(indi):
             # Combine names into SURNAME, drop other name columns
             commercial_row['SURNAME'] = f"{row['SURNAME']} {row['FIRSTNAME']} {row['MIDDLENAME']}".strip()
             commercial_row = commercial_row.drop(['FIRSTNAME', 'MIDDLENAME'])
-            
+            # Set DATA column to 'D'
+            commercial_row['DATA'] = 'D'
             # Append to commercial entities
             corpo2 = pd.concat([corpo2, pd.DataFrame([commercial_row])], ignore_index=True)
             rows_to_remove.append(index)
     
     # Remove identified commercial entities from individual borrowers
     indi = indi.drop(rows_to_remove).reset_index(drop=True)
+    
+    # After creation, ensure DATA column exists and is filled, and replace None with ''
+    if not corpo2.empty:
+        if 'DATA' not in corpo2.columns:
+            corpo2['DATA'] = 'D'
+        corpo2['DATA'] = corpo2['DATA'].fillna('D')
+        corpo2 = corpo2.where(pd.notnull(corpo2), '')
     
     # Debug prints
     print("Number of commercial entities found:", len(corpo2))
@@ -2203,8 +2256,9 @@ def split_consumer_entities(corpo):
             consumer_data = {}
             # Copy all data from the corporate row except BUSINESSNAME
             for col in row.index:
-                if col != 'BUSINESSNAME':
-                    consumer_data[col] = row[col]
+                #if col != 'BUSINESSNAME':
+                consumer_data[col] = row[col]
+            consumer_data['ORIGINAL_BUSINESSNAME'] = business_name
             # Split the business name into name parts
             name_parts = business_name.split()
             # Assign name parts to appropriate fields
@@ -2220,13 +2274,26 @@ def split_consumer_entities(corpo):
                     consumer_data['MIDDLENAME'] = ''
             # Add DEPENDANTS column with '00' value
             consumer_data['DEPENDANTS'] = '00'
+            # Add DATA column with 'D' value
+            consumer_data['DATA'] = 'D'
             # Add to extracted consumers list
             extracted_consumers.append(consumer_data)
             rows_to_remove.append(index)
     # Convert extracted consumers to DataFrame if any were found
     if extracted_consumers:
         indi2 = pd.DataFrame(extracted_consumers)
-        print(f"Ensured DEPENDANTS column is populated with '00' for {len(indi2)} extracted consumer records")
+        # Ensure DATA and DEPENDANTS columns exist and are filled
+        if 'DATA' not in indi2.columns:
+            indi2['DATA'] = 'D'
+        if 'DEPENDANTS' not in indi2.columns:
+            indi2['DEPENDANTS'] = '00'
+        indi2['DATA'] = indi2['DATA'].fillna('D')
+        indi2['DEPENDANTS'] = indi2['DEPENDANTS'].fillna('00')
+        # Replace None with empty string for all columns
+        indi2 = indi2.where(pd.notnull(indi2), '')
+        # Remove 'none' and similar values (case-insensitive) from all columns
+        indi2 = indi2.replace(['none', 'None', 'nan', 'null', 'nill', 'nil'], '', regex=True)
+        print(f"Ensured DEPENDANTS and DATA columns are populated for {len(indi2)} extracted consumer records")
     # Remove identified consumer entities from corporate borrowers
     corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
     # Debug prints
@@ -2615,80 +2682,48 @@ def trim_strings_to_59(df):
     
     return df
 
+def convert_numpy(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
 def upload_file(request):
     if request.method == 'POST':
         form = ExcelUploadForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = request.FILES['file']
-            # Get original filename without extension
             original_filename = os.path.splitext(uploaded_file.name)[0]
-
             fs = FileSystemStorage()
             filename = fs.save(uploaded_file.name, uploaded_file)
             file_path = os.path.join(settings.MEDIA_ROOT, filename)
-          
             try:
-                # Read all sheets into a dictionary of DataFrames
                 xds = pd.read_excel(file_path, sheet_name=None, na_filter=False, dtype=object)
-
-                 # Store column counts and processing stats
                 processing_stats = []
-
-                # Convert all sheets to string type immediately after reading
                 for sheet_name, df in xds.items():
                     initial_records = len(df)
-
-                     # Record initial column count
                     processing_stats.append({
                         'sheet_name': sheet_name,
                         'initial_columns': len(df.columns),
-                       'initial_records': initial_records,  # Track raw row count
+                        'initial_records': initial_records,
                         'processed_columns': None,
-                        'valid_records': 0  # To be updated after column renaming
+                        'valid_records': 0
                     })
-
-                    
-                    print(f"\nConverting sheet to string: {sheet_name}")
-                    # Convert all columns to string
                     for col in df.columns:
                         df[col] = df[col].astype(str)
-                        # Replace 'nan' values with empty string
                         df[col] = df[col].replace({'nan': '', 'None': '', 'NaN': ''})
                     xds[sheet_name] = df
-
-                # Print initial sheet information
-                print("\n=== INITIAL SHEET COUNT ===")
-                print(f"Number of sheets in uploaded file: {len(xds)}")
-                print("Sheets found:")
-                for sheet_name in xds.keys():
-                    print(f"- {sheet_name}")
-                print("========================")
-
-                # Ensure all required sheets exist
                 processed_sheets = ensure_all_sheets_exist(xds)
-                
-                # Print processed sheet information
-                print("\n=== PROCESSED SHEET COUNT ===")
-                print(f"Number of sheets after processing: {len(processed_sheets)}")
-                print("Final sheets:")
-                for sheet_name in processed_sheets.keys():
-                    print(f"- {sheet_name}")
-                print("========================")
-
-                # Process each sheet
                 for sheet_name, sheet_data in xds.items():
                     cleaned_name = clean_sheet_name(sheet_name)
-                    # Process sheet
                     cleaned_df = sheet_data.copy()
                     cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill','NA'], '', inplace=True)
-# Fix column cleaning sequence
-                    cleaned_df.columns = [
-                        str(col).upper().strip()  # Convert to uppercase first, then strip
-                        for col in cleaned_df.columns
-                    ]
+                    cleaned_df.columns = [str(col).upper().strip() for col in cleaned_df.columns]
+                    cleaned_df = preprocess_tenor_from_headers(cleaned_df)
                     cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
-
-                    # Apply appropriate mapping based on sheet name
                     if cleaned_name == 'individualborrowertemplate':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consu_mapping)
                     elif cleaned_name == 'corporateborrowertemplate':
@@ -2703,7 +2738,6 @@ def upload_file(request):
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consumer_merged)
                     elif cleaned_name == 'commercialmerged':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, commercial_merged)
-
                     for stat in processing_stats:
                         if stat['sheet_name'] == sheet_name:
                             if cleaned_name == 'individualborrowertemplate' and 'CUSTOMERID' in cleaned_df.columns:
@@ -2717,8 +2751,6 @@ def upload_file(request):
                             elif cleaned_name == 'guarantorsinformation' and 'CUSTOMERSACCOUNTNUMBER' in cleaned_df.columns:
                                 stat['valid_records'] = cleaned_df['CUSTOMERSACCOUNTNUMBER'].astype(str).ne('').sum()
                             break
-
-                    # Apply processing steps
                     cleaned_df = process_dates(cleaned_df)
                     cleaned_df = process_names(cleaned_df)
                     cleaned_df = process_special_characters(cleaned_df)
@@ -2754,121 +2786,47 @@ def upload_file(request):
                     cleaned_df = positioninBusiness(cleaned_df)
                     cleaned_df = trim_strings_to_59(cleaned_df)
 
-   #---------------------------------------------------------ABANDONED FOR NOW------------------------------------------                 
-                    # cleaned_df = process_business_sector(cleaned_df)
-    #--------------------------------------------------------------------------------------------------------------------                
                     for stat in processing_stats:
                         if stat['sheet_name'] == sheet_name:
                             stat['processed_columns'] = len(cleaned_df.columns)
                             break
-
                     processed_sheets[cleaned_name] = cleaned_df
 
-                # Merge processed sheets
-                indi, corpo = merge_dataframes(processed_sheets)
+                # --- Human-in-the-loop: Extract split candidates ---
+                # Use the same logic as merge_dataframes, but pause after split candidates are identified
+                consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
+                comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
+                credit = processed_sheets.get('creditinformation', pd.DataFrame())
+                guar = processed_sheets.get('guarantorsinformation', pd.DataFrame())
+                prin = processed_sheets.get('principalofficerstemplate', pd.DataFrame())
+                consumer_merged = processed_sheets.get('consumermerged', pd.DataFrame())
+                commercial_merged = processed_sheets.get('commercialmerged', pd.DataFrame())
 
-                # Now modify middle names after merging
-                indi = modify_middle_names(indi)
-                corpo = modify_middle_names(corpo)
+                indi = merge_individual_borrowers(consu, credit, guar)
+                corpo = merge_corporate_borrowers(comm, credit, prin)
 
-                # Remove duplicates from merged DataFrames
-                indi = remove_duplicates(indi)
-                corpo = remove_duplicates(corpo)
-
-                
-
-                total_individual_records = len(indi) if not indi.empty else 0
-                total_corporate_records = len(corpo) if not corpo.empty else 0
-
-                # Generate unique filenames with original filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                indi_output_filename = f"{original_filename}_individual_borrowers_{timestamp}.xlsx"
-                corpo_output_filename = f"{original_filename}_corporate_borrowers_{timestamp}.xlsx"
-                full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
-
-
-# Create excel directory structure
-                excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
-                excel_individual_dir = os.path.join(excel_dir, 'individual')
-                excel_corporate_dir = os.path.join(excel_dir, 'corporate')
-                excel_full_dir = os.path.join(excel_dir, 'full')
-                os.makedirs(excel_individual_dir, exist_ok=True)
-                os.makedirs(excel_corporate_dir, exist_ok=True)
-                os.makedirs(excel_full_dir, exist_ok=True)
-
-                # Save individual borrowers merged file
-                indi_excel_path = os.path.join(excel_individual_dir, indi_output_filename)
-                indi.to_excel(indi_excel_path, index=False)
-                indi_processed_file_url = fs.url(os.path.join('excel', 'individual', indi_output_filename))
-
-                # Save corporate borrowers merged file
-                corpo_excel_path = os.path.join(excel_corporate_dir, corpo_output_filename)
-                corpo.to_excel(corpo_excel_path, index=False)
-                corpo_processed_file_url = fs.url(os.path.join('excel', 'corporate', corpo_output_filename))
-
-                # Save full processed file with all sheets
-                full_excel_path = os.path.join(excel_full_dir, full_output_filename)
-                with pd.ExcelWriter(full_excel_path, engine='openpyxl') as writer:
-                    # Save individual processed sheets
-                    for sheet_name, df in processed_sheets.items():
-                        print(f"Saving sheet: {sheet_name}")
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-                    # Save merged sheets
-                    if not indi.empty:
-                        indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
-                    if not corpo.empty:
-                        corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
-                full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
-    # Add TXT version saving
-                indi_txt_filename = f"{original_filename}_individual_borrowers_{timestamp}.txt"
-                corpo_txt_filename = f"{original_filename}_corporate_borrowers_{timestamp}.txt"
-                full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
-
-# Add this before file processing
-                txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
-                os.makedirs(txt_dir, exist_ok=True)  # Create txt directory if not exists
-                # Create subdirectories
-                txt_individual_dir = os.path.join(txt_dir, 'individual')
-                txt_corporate_dir = os.path.join(txt_dir, 'corporate')
-                txt_full_dir = os.path.join(txt_dir, 'full')
-                os.makedirs(txt_individual_dir, exist_ok=True)
-                os.makedirs(txt_corporate_dir, exist_ok=True)
-                os.makedirs(txt_full_dir, exist_ok=True)
-                # Save individual borrowers TXT
-                indi_txt_path = os.path.join(txt_individual_dir, indi_txt_filename)
-                indi.to_csv(indi_txt_path, sep='\t', index=False, encoding='utf-8')
-
-                # Save corporate borrowers TXT
-                corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
-                corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
-
-                # Save full processed TXT (example - would need custom implementation)
-                full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
-                with open(full_txt_path, 'w', encoding='utf-8') as f:
-                    for sheet_name, df in processed_sheets.items():
-                        f.write(f"=== {sheet_name} ===\n")
-                        df.to_csv(f, sep='\t', index=False)
-                        f.write("\n\n")
-                # Add TXT URLs to context
-                indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
-                corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename)) 
-                full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
-                
-                return render(request, 'upload.html', {
+                # Split commercial entities from individual borrowers (candidates for manual review)
+                split_indi, split_candidates_commercial = split_commercial_entities(indi)
+                # Split consumer entities from corporate borrowers (candidates for manual review)
+                split_corpo, split_candidates_consumer = split_consumer_entities(corpo)
+                # Store all data in session for next step
+                request.session['split_candidates_commercial'] = split_candidates_commercial.to_json(orient='split')
+                request.session['split_candidates_consumer'] = split_candidates_consumer.to_json(orient='split')
+                request.session['indi'] = split_indi.to_json(orient='split')
+                request.session['corpo'] = split_corpo.to_json(orient='split')
+                request.session['processing_stats'] = json.loads(json.dumps(processing_stats, default=convert_numpy))
+                request.session['original_filename'] = original_filename
+                # Render verification page with all split candidates
+                commercial_records = json.loads(split_candidates_commercial.to_json(orient='records'))
+                consumer_records = json.loads(split_candidates_consumer.to_json(orient='records'))
+                return render(request, 'verify_split.html', {
                     'form': form,
-                    'success_message': 'File processed and merged successfully!',
+                    'commercial_candidates': commercial_records,
+                    'consumer_candidates': consumer_records,
+                    'columns_commercial': list(split_candidates_commercial.columns),
+                    'columns_consumer': list(split_candidates_consumer.columns),
                     'processing_stats': processing_stats,
-                    'total_individual': total_individual_records,
-                    'total_corporate': total_corporate_records,
-                    'individual_download_url': indi_processed_file_url,
-                    'corporate_download_url': corpo_processed_file_url,
-                    'full_download_url': full_processed_file_url,
-                    'individual_txt_url': indi_txt_url,
-                    'corporate_txt_url': corpo_txt_url,
-                    'full_txt_url': full_txt_url
                 })
-
             except Exception as e:
                 import traceback
                 error_details = traceback.format_exc()
@@ -2876,17 +2834,171 @@ def upload_file(request):
                     'form': form,
                     'error_message': f'Error Details:\n{error_details}'
                 })
-                #  return render(request, 'upload.html', {
-                #     'form': form,
-                #     'error_message': f'Error processing file: {str(e)}'
-                # })
             finally:
-                # Clean up the uploaded file
                 if os.path.exists(file_path):
                     os.remove(file_path)
-
     else:
         form = ExcelUploadForm()
-    
     return render(request, 'upload.html', {'form': form})
+
+def clean_for_output(df):
+    # Convert all columns to string
+    for col in df.columns:
+        df[col] = df[col].astype(str)
+    # Replace all null/nan/nil/none with empty string
+    df.replace(['N/A', 'N.A', 'None', 'NaN', 'nan', 'null', 'n/a', '#N/A', 'NIL', 'Nill', 'nil', 'none', 'None'], '', inplace=True)
+    return df
+
+def enforce_string_columns(df):
+    for col in df.columns:
+        df[col] = df[col].astype(str)
+    return df
+
+@csrf_exempt  # You may want to use proper CSRF handling in production
+def verify_split_decision(request):
+    if request.method == 'POST':
+        # Get user checkbox moves from POST (lists of booleans)
+        commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
+        consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
+        # Retrieve stored data from session
+        split_candidates_commercial = pd.read_json(request.session['split_candidates_commercial'], orient='split', dtype=str)
+        split_candidates_commercial = enforce_string_columns(split_candidates_commercial)
+        split_candidates_consumer = pd.read_json(request.session['split_candidates_consumer'], orient='split', dtype=str)
+        split_candidates_consumer = enforce_string_columns(split_candidates_consumer)
+        indi = pd.read_json(request.session['indi'], orient='split', dtype=str)
+        indi = enforce_string_columns(indi)
+        corpo = pd.read_json(request.session['corpo'], orient='split', dtype=str)
+        corpo = enforce_string_columns(corpo)
+        processing_stats = request.session.get('processing_stats', [])
+        original_filename = request.session.get('original_filename', 'output')
+
+        # For commercial candidates: checked = move to corpo, unchecked = stay in indi
+        move_to_corp_idx = [i for i, move in enumerate(commercial_moves) if move]
+        stay_in_indi_idx = [i for i, move in enumerate(commercial_moves) if not move]
+
+
+        confirmed_commercial = split_candidates_commercial.iloc[move_to_corp_idx]
+        confirmed_individual = split_candidates_commercial.iloc[stay_in_indi_idx]
+
+
+        # For consumer candidates: checked = move to indi, unchecked = stay in corpo
+        move_to_indi_idx = [i for i, move in enumerate(consumer_moves) if move]
+        stay_in_corp_idx = [i for i, move in enumerate(consumer_moves) if not move]
+
+
+        confirmed_consumer = split_candidates_consumer.iloc[move_to_indi_idx]
+        confirmed_corporate = split_candidates_consumer.iloc[stay_in_corp_idx].copy()
+
+        if not confirmed_corporate.empty and 'ORIGINAL_BUSINESSNAME' in confirmed_corporate.columns:
+            confirmed_corporate['BUSINESSNAME'] = confirmed_corporate['ORIGINAL_BUSINESSNAME']
+            # Drop the temporary column and any individual name columns it might have
+            columns_to_drop = ['ORIGINAL_BUSINESSNAME', 'SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+            confirmed_corporate = confirmed_corporate.drop(columns=[col for col in columns_to_drop if col in confirmed_corporate.columns], errors='ignore')
+        # Apply mapping only to moved records
+        if not confirmed_commercial.empty:
+            # # Reconstruct BUSINESSNAME for corporate records
+            # if 'BUSINESSNAME' not in confirmed_commercial.columns:
+            #     confirmed_commercial['BUSINESSNAME'] = (
+            #         confirmed_commercial['SURNAME'].fillna('') + ' '
+            #         + confirmed_commercial['FIRSTNAME'].fillna('') + ' '
+            #         + confirmed_commercial['MIDDLENAME'].fillna('')
+            #     ).str.strip()
+            # # Drop name and dependant columns for corporate
+            # columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+            # confirmed_commercial = confirmed_commercial.drop(columns=[col for col in columns_to_remove if col in confirmed_commercial.columns], errors='ignore')
+            confirmed_commercial = rename_columns(confirmed_commercial, ConsuToComm.copy())
+            confirmed_commercial = enforce_string_columns(confirmed_commercial)
+
+        if not confirmed_consumer.empty:
+            confirmed_consumer = rename_columns(confirmed_consumer, CommToConsu.copy())
+            confirmed_consumer = enforce_string_columns(confirmed_consumer)
+            
+        # Concatenate
+        indi = pd.concat([indi, confirmed_individual, confirmed_consumer], ignore_index=True)
+        corpo = pd.concat([corpo, confirmed_commercial, confirmed_corporate], ignore_index=True)
+
+
+        # All further processing should NOT change dtypes, but just in case:
+        indi = modify_middle_names(indi)
+        corpo = modify_middle_names(corpo)
+
+
+        indi = remove_duplicates(indi)
+        corpo = remove_duplicates(corpo)
+
+
+        indi = clean_for_output(indi)
+        corpo = clean_for_output(corpo)
+        # Drop name and dependant columns from corpo again to be sure
+        columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+        corpo = corpo.drop(columns=[col for col in columns_to_remove if col in corpo.columns], errors='ignore')
+
+        total_individual_records = len(indi) if not indi.empty else 0
+        total_corporate_records = len(corpo) if not corpo.empty else 0
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        indi_output_filename = f"{original_filename}_individual_borrowers_{timestamp}.xlsx"
+        corpo_output_filename = f"{original_filename}_corporate_borrowers_{timestamp}.xlsx"
+        full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
+        excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
+        excel_individual_dir = os.path.join(excel_dir, 'individual')
+        excel_corporate_dir = os.path.join(excel_dir, 'corporate')
+        excel_full_dir = os.path.join(excel_dir, 'full')
+        os.makedirs(excel_individual_dir, exist_ok=True)
+        os.makedirs(excel_corporate_dir, exist_ok=True)
+        os.makedirs(excel_full_dir, exist_ok=True)
+
+        fs = FileSystemStorage()
+        
+
+        indi_excel_path = os.path.join(excel_individual_dir, indi_output_filename)
+        indi.to_excel(indi_excel_path, index=False)
+        indi_processed_file_url = fs.url(os.path.join('excel', 'individual', indi_output_filename))
+        corpo_excel_path = os.path.join(excel_corporate_dir, corpo_output_filename)
+        corpo.to_excel(corpo_excel_path, index=False)
+        corpo_processed_file_url = fs.url(os.path.join('excel', 'corporate', corpo_output_filename))
+        full_excel_path = os.path.join(excel_full_dir, full_output_filename)
+        with pd.ExcelWriter(full_excel_path, engine='openpyxl') as writer:
+            indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
+            corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
+        full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
+        # TXT versions
+        indi_txt_filename = f"{original_filename}_individual_borrowers_{timestamp}.txt"
+        corpo_txt_filename = f"{original_filename}_corporate_borrowers_{timestamp}.txt"
+        full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
+        txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
+        os.makedirs(txt_dir, exist_ok=True)
+        txt_individual_dir = os.path.join(txt_dir, 'individual')
+        txt_corporate_dir = os.path.join(txt_dir, 'corporate')
+        txt_full_dir = os.path.join(txt_dir, 'full')
+        os.makedirs(txt_individual_dir, exist_ok=True)
+        os.makedirs(txt_corporate_dir, exist_ok=True)
+        os.makedirs(txt_full_dir, exist_ok=True)
+        indi_txt_path = os.path.join(txt_individual_dir, indi_txt_filename)
+        indi.to_csv(indi_txt_path, sep='\t', index=False, encoding='utf-8')
+        corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
+        corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
+        full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
+        with open(full_txt_path, 'w', encoding='utf-8') as f:
+            indi.to_csv(f, sep='\t', index=False)
+            f.write("\n\n")
+            corpo.to_csv(f, sep='\t', index=False)
+        indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
+        corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
+        full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
+        return render(request, 'upload.html', {
+            'form': ExcelUploadForm(),
+            'success_message': 'File processed and merged successfully!',
+            'processing_stats': processing_stats,
+            'total_individual': total_individual_records,
+            'total_corporate': total_corporate_records,
+            'individual_download_url': indi_processed_file_url,
+            'corporate_download_url': corpo_processed_file_url,
+            'full_download_url': full_processed_file_url,
+            'individual_txt_url': indi_txt_url,
+            'corporate_txt_url': corpo_txt_url,
+            'full_txt_url': full_txt_url
+        })
+    else:
+        return render(request, 'upload.html', {'form': ExcelUploadForm(), 'error_message': 'Invalid request.'})
 
