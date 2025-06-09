@@ -2184,7 +2184,7 @@ def split_commercial_entities(indi):
             
             # Combine names into SURNAME, drop other name columns
             commercial_row['SURNAME'] = f"{row['SURNAME']} {row['FIRSTNAME']} {row['MIDDLENAME']}".strip()
-            commercial_row = commercial_row.drop(['FIRSTNAME', 'MIDDLENAME'])
+            # commercial_row = commercial_row.drop(['FIRSTNAME', 'MIDDLENAME'])
             # Set DATA column to 'D'
             commercial_row['DATA'] = 'D'
             # Append to commercial entities
@@ -2200,11 +2200,6 @@ def split_commercial_entities(indi):
             corpo2['DATA'] = 'D'
         corpo2['DATA'] = corpo2['DATA'].fillna('D')
         corpo2 = corpo2.where(pd.notnull(corpo2), '')
-    
-    # Debug prints
-    print("Number of commercial entities found:", len(corpo2))
-    print("First few commercial entities:")
-    print(corpo2.head())
     
     return indi, corpo2
 
@@ -2229,77 +2224,52 @@ def is_consumer_entity(name, commercial_keywords, threshold=90):
     return True
 
 def split_consumer_entities(corpo):
-    """Split consumer entities from corporate borrowers using fuzzy standalone word match for commercial keywords"""
-    # Check if BUSINESSNAME column exists in the DataFrame
+    """
+    FIXED: This function now correctly splits a business name into a maximum
+    of three parts and preserves the original business name for reverting.
+    """
     if 'BUSINESSNAME' not in corpo.columns:
-        print("WARNING: 'BUSINESSNAME' column not found in corporate borrowers DataFrame")
-        print("Skipping consumer entity extraction")
-        # Return the original DataFrame and an empty DataFrame for indi2
         return corpo, pd.DataFrame()
         
-    # Create a DataFrame to store consumer entities
     indi2 = pd.DataFrame()
-    
-    # Rows to remove from corporate borrowers
     rows_to_remove = []
-    extracted_consumers = []
     
-    # Iterate through corporate borrowers to find consumer entities
     for index, row in corpo.iterrows():
-        # Get business name for checking
-        if 'BUSINESSNAME' not in row or pd.isna(row['BUSINESSNAME']):
+        if pd.isna(row['BUSINESSNAME']):
             continue
+        
         business_name = str(row['BUSINESSNAME']).strip()
-        # Check if the business name is a consumer entity (using fuzzy standalone word match)
+        
         if is_consumer_entity(business_name, commercial_keywords):
-            # Create a new consumer row from the corporate row
-            consumer_data = {}
-            # Copy all data from the corporate row except BUSINESSNAME
-            for col in row.index:
-                #if col != 'BUSINESSNAME':
-                consumer_data[col] = row[col]
+            consumer_data = row.to_dict()
+            
+            # Store the original name for records that might be sent back
             consumer_data['ORIGINAL_BUSINESSNAME'] = business_name
-            # Split the business name into name parts
-            name_parts = business_name.split()
-            # Assign name parts to appropriate fields
-            if len(name_parts) >= 1:
-                consumer_data['SURNAME'] = name_parts[0]
-                if len(name_parts) >= 2:
-                    consumer_data['FIRSTNAME'] = name_parts[1]
-                else:
-                    consumer_data['FIRSTNAME'] = ''
-                if len(name_parts) >= 3:
-                    consumer_data['MIDDLENAME'] = ' '.join(name_parts[2:])
-                else:
-                    consumer_data['MIDDLENAME'] = ''
-            # Add DEPENDANTS column with '00' value
+            
+            # Split the business name into a max of 3 parts
+            name_parts = business_name.split(maxsplit=2)
+            
+            # Assign name parts correctly
+            consumer_data['SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
+            consumer_data['FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
+            consumer_data['MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
             consumer_data['DEPENDANTS'] = '00'
-            # Add DATA column with 'D' value
             consumer_data['DATA'] = 'D'
-            # Add to extracted consumers list
-            extracted_consumers.append(consumer_data)
+
+            # Remove the original BUSINESSNAME key to avoid conflicts
+            if 'BUSINESSNAME' in consumer_data:
+                del consumer_data['BUSINESSNAME']
+
+            temp_df = pd.DataFrame([consumer_data])
+            indi2 = pd.concat([indi2, temp_df], ignore_index=True)
             rows_to_remove.append(index)
-    # Convert extracted consumers to DataFrame if any were found
-    if extracted_consumers:
-        indi2 = pd.DataFrame(extracted_consumers)
-        # Ensure DATA and DEPENDANTS columns exist and are filled
-        if 'DATA' not in indi2.columns:
-            indi2['DATA'] = 'D'
-        if 'DEPENDANTS' not in indi2.columns:
-            indi2['DEPENDANTS'] = '00'
-        indi2['DATA'] = indi2['DATA'].fillna('D')
-        indi2['DEPENDANTS'] = indi2['DEPENDANTS'].fillna('00')
-        # Replace None with empty string for all columns
+            
+    if not corpo.empty and rows_to_remove:
+        corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
+    
+    if not indi2.empty:
         indi2 = indi2.where(pd.notnull(indi2), '')
-        # Remove 'none' and similar values (case-insensitive) from all columns
-        indi2 = indi2.replace(['none', 'None', 'nan', 'null', 'nill', 'nil'], '', regex=True)
-        print(f"Ensured DEPENDANTS and DATA columns are populated for {len(indi2)} extracted consumer records")
-    # Remove identified consumer entities from corporate borrowers
-    corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
-    # Debug prints
-    print("Number of consumer entities found:", len(indi2))
-    print("First few consumer entities:")
-    print(indi2.head())
+
     return corpo, indi2
 
 def merge_dataframes(processed_sheets):
