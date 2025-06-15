@@ -2791,6 +2791,12 @@ def upload_file(request):
                 request.session['corpo'] = split_corpo.to_json(orient='split')
                 request.session['processing_stats'] = json.loads(json.dumps(processing_stats, default=convert_numpy))
                 request.session['original_filename'] = original_filename
+                # Reorder columns for consumer candidates
+                reordered_consumer_columns = reorder_consumer_columns(split_candidates_consumer.columns)
+                
+                # Reindex the DataFrame with the new column order
+                split_candidates_consumer = split_candidates_consumer.reindex(columns=reordered_consumer_columns)
+                
                 # Render verification page with all split candidates
                 commercial_records = json.loads(split_candidates_commercial.to_json(orient='records'))
                 consumer_records = json.loads(split_candidates_consumer.to_json(orient='records'))
@@ -2799,7 +2805,7 @@ def upload_file(request):
                     'commercial_candidates': commercial_records,
                     'consumer_candidates': consumer_records,
                     'columns_commercial': list(split_candidates_commercial.columns),
-                    'columns_consumer': list(split_candidates_consumer.columns),
+                    'columns_consumer': reordered_consumer_columns,  # Use the reordered columns
                     'processing_stats': processing_stats,
                 })
             except Exception as e:
@@ -2828,6 +2834,39 @@ def enforce_string_columns(df):
     for col in df.columns:
         df[col] = df[col].astype(str)
     return df
+
+def reorder_consumer_columns(columns):
+    """
+    Reorder columns to place SURNAME, FIRSTNAME, MIDDLENAME, and DEPENDANTS 
+    immediately after BUSINESSREGISTRATIONNUMBER for better logical grouping.
+    
+    Args:
+        columns (list): List of column names
+        
+    Returns:
+        list: Reordered list of column names
+    """
+    # Convert to list if it's a pandas Index
+    columns = list(columns)
+    
+    # Define the columns we want to move
+    columns_to_move = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+    
+    # Only proceed if all columns to move exist in the DataFrame
+    if all(col in columns for col in columns_to_move):
+        # Remove the columns we want to move from their current positions
+        remaining_columns = [col for col in columns if col not in columns_to_move]
+        
+        # Find the index of BUSINESSREGISTRATIONNUMBER
+        if 'BUSINESSREGISTRATIONNUMBER' in remaining_columns:
+            insert_index = remaining_columns.index('BUSINESSREGISTRATIONNUMBER') + 1
+            
+            # Insert the columns after BUSINESSREGISTRATIONNUMBER
+            remaining_columns[insert_index:insert_index] = columns_to_move
+            return remaining_columns
+    
+    # Return original order if we couldn't reorder
+    return columns
 
 @csrf_exempt  # You may want to use proper CSRF handling in production
 def transform_to_commercial(df):
