@@ -20,7 +20,6 @@
 
         .main-content {
             padding: 2rem;
-            padding-bottom: 100px;
         }
 
         .page-header {
@@ -96,10 +95,6 @@
         }
         
         .verification-actions {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
             background-color: #fff;
             padding: 1rem 2rem;
             border-top: 1px solid #dee2e6;
@@ -107,6 +102,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-top: 2rem;
         }
 
         #spinner-overlay {
@@ -218,16 +214,16 @@ function submitVerificationForm() {
 
     var commercial = [];
     var consumer = [];
-    {% if commercial_candidates %}
+    // {% if commercial_candidates %}
     $('input[name^="commercial_move_"]').each(function() {
         commercial.push($(this).is(':checked'));
     });
-    {% endif %}
-    {% if consumer_candidates %}
+    // {% endif %}
+    // {% if consumer_candidates %}
     $('input[name^="consumer_move_"]').each(function() {
         consumer.push($(this).is(':checked'));
     });
-    {% endif %}
+    // {% endif %}
 
     var form = $('#verifyForm');
     var csrf_token = form.find('input[name="csrfmiddlewaretoken"]').val();
