@@ -182,7 +182,7 @@ guar_mapping = {
         'GUARANTOREMAIL': ['guarantorsemailaddress','guarantors email','guarantorsemail','guarantors email address','GUARANTOREMAIL', 'GUARANTORS E-MAIL ADDRESS', "GUARANTOR'S EMAIL ADDRESS"],
         'FILLER':['FILLER','filler']
     }
-consumer_merged={
+consumer_merged_mapping={
         'DATA':['DATA','data'],
         'CUSTOMERID': ['customerid','customernumber','cusid','idno','custid','customeridind','customerkey','custcode','subjectidentificationnumber','customerno', 'customersid', 'idno', 'otheridnumber', 'customernumber', 'custno', 'customerkey', 'subjectidentificationnumber', 'custcode', 'customerid', 'customeridorcustomernumber', 'subjectidno', 'subjectidentificationnumber', 'customersnumber', 'sheet1customerid', 'idno', 'consumerid'],
         'BRANCHCODE': ['branchcode','branchidno','brchcode','branch','customerbranchcode','customersbranchcode','branchid','branchidentificationnumber', 'branchidnumber','branchidentificationno'],
@@ -294,7 +294,7 @@ consumer_merged={
         'FILLER':['FILLER','filler']
 }
 
-commercial_merged = {
+commercial_merged_mapping = {
         'DATA':['Data'],
         'BUSINESSREGISTRATIONNUMBER': ['businessidentificationnumber','businesidentificationnumber','businessid','businessidno','businessidentificationno','businessidentificationno','businessregistrationnumber','businesidentificationnumber','regno','regno','businessidno','rcnumber','busregnumber','businessregistrationnumber','businessregno','businessidentificationno','busregnum','businessregistrationnumber','subjectmicroenterpriseregistrationnumber','businessidentificationno','businessidentificationnumber','subjectbusinessregistrationnumber','trusteeregisteredno','refno','busregno','dob','businnessregno'],
         'BUSINESSNAME': ['businessname','businesname','surname','customername','surnamefirstnameothernames','fullname','mfassociationname','description','registeredname','surname1','subjectfamilynamelastname','subjectregisteredname','acctname','subjectmicroenterprisename','businessname1','subjectregisteredname','registeredname','subfullname','customername','businessregisteredname'],

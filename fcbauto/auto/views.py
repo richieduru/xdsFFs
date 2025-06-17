@@ -9,7 +9,7 @@ from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from .forms import ExcelUploadForm
-from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,consumer_merged,commercial_merged,CommToConsu, commercial_keywords
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,CommToConsu, commercial_keywords,consumer_merged_mapping,commercial_merged_mapping
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n
@@ -175,14 +175,17 @@ def remove_special_chars(text):
     return cleaned
 
 def remove_titles(name):
-    """Remove common titles from names"""
     if not isinstance(name, str):
         return name
-        
-    titles = ['Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT', 
-              'COL', 'LADY', 'MAJ', 'PST', 'PROF', 'REV', 'SGT',
-              'SIR', 'HE', 'JUDG', 'CHF', 'ALHJ', 'APOS', 'CDR','ALH','Alh',
-              'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT','AND','and']
+    
+    titles = [
+        'Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT','pastor',
+        'COL', 'LADY', 'MAJ', 'PST', 'PROF', 'REV', 'SGT',
+        'SIR', 'HE', 'JUDG', 'CHF', 'ALHJ', 'APOS', 'CDR', 'ALH', 'Alh',
+        'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT', 'AND', 'and',
+        'PASTOR', 'PAST', 'PST', 'ALHAJI', 'ALH', 'ALH.', 'ALHAJ', 'ALHADJI', 'ALHAJJI', 'ALHAJ.', 'ALHADJ', 'ALHADJ.',
+        'PASTOR.', 'PASTOR', 'PAST.', 'PST.', 'REV.', 'REV', 'DR.', 'MR.', 'MRS.', 'MS.'
+    ]
     
     pattern = r'\b(?:' + '|'.join(re.escape(title) for title in titles) + r')\b'
     cleaned_name = re.sub(pattern, '', name, flags=re.IGNORECASE)
@@ -365,19 +368,6 @@ def process_dates(df):
     
     return df
 
-def remove_titles(name):
-    """Remove common titles from names"""
-    if not isinstance(name, str):
-        return ''
-    
-    titles = ['Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT', 
-              'COL', 'LADY', 'MAJ', 'PST', 'PROF', 'REV', 'SGT',
-              'SIR', 'HE', 'JUDG', 'CHF', 'ALHJ', 'APOS', 'CDR',
-              'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT']
-    
-    pattern = r'\b(?:' + '|'.join(re.escape(title) for title in titles) + r')\b'
-    cleaned_name = re.sub(pattern, '', name, flags=re.IGNORECASE)
-    return ' '.join(cleaned_name.split())
 
 def remove_special_chars(text):
     """Remove special characters from text while preserving spaces"""
@@ -809,7 +799,7 @@ def process_special_characters(df):
 
     # Now handle specific columns to remove spaces
     # ------------------------------------------------# take notr of this.-------------------------------------------------------
-    for col in ['CUSTOMERID', 'TAXID', 'OTHERID','LEGALCHALLENGESTATUS','LOANSECURITYSTATUS']:
+    for col in ['CUSTOMERID', 'TAXID', 'OTHERID','LEGALCHALLENGESTATUS','LOANSECURITYSTATUS','ACCOUNTSTATUS']:
         if col in df.columns:
             df[col] = df[col].apply(remove_spaces)
 
@@ -1393,7 +1383,7 @@ def map_accountStatus(value):
     
     for category, values in AccountStatus_dict.items():
         # Convert dictionary values to lowercase and remove special characters for comparison
-        dict_values = [str(v).lower().replace(r'[^a-zA-Z0-9]', '') for v in values]
+        dict_values = [re.sub(r'[^a-zA-Z0-9]', '', str(v).lower()) for v in values]
         if value in dict_values:
             return category
     return None  # Return None if no match is found
@@ -2292,6 +2282,9 @@ def merge_dataframes(processed_sheets):
         print("\n=== PROCESSING MERGED SHEETS ===")
         indi = processed_sheets.get('consumermerged', pd.DataFrame())
         corpo = processed_sheets.get('commercialmerged', pd.DataFrame())
+    else:
+        indi = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
+        corpo = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
         
         # Apply null value cleaning
         indi = indi.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
@@ -2710,9 +2703,9 @@ def upload_file(request):
                     elif cleaned_name == 'guarantorsinformation':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, guar_mapping)
                     elif cleaned_name == 'consumermerged':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consumer_merged)
+                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consumer_merged_mapping)
                     elif cleaned_name == 'commercialmerged':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, commercial_merged)
+                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, commercial_merged_mapping)
                     for stat in processing_stats:
                         if stat['sheet_name'] == sheet_name:
                             if cleaned_name == 'individualborrowertemplate' and 'CUSTOMERID' in cleaned_df.columns:
@@ -2769,16 +2762,18 @@ def upload_file(request):
 
                 # --- Human-in-the-loop: Extract split candidates ---
                 # Use the same logic as merge_dataframes, but pause after split candidates are identified
-                consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
-                comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
-                credit = processed_sheets.get('creditinformation', pd.DataFrame())
-                guar = processed_sheets.get('guarantorsinformation', pd.DataFrame())
-                prin = processed_sheets.get('principalofficerstemplate', pd.DataFrame())
-                consumer_merged = processed_sheets.get('consumermerged', pd.DataFrame())
-                commercial_merged = processed_sheets.get('commercialmerged', pd.DataFrame())
-
-                indi = merge_individual_borrowers(consu, credit, guar)
-                corpo = merge_corporate_borrowers(comm, credit, prin)
+                # FIX: Use merged sheets directly if present
+                if 'consumermerged' in processed_sheets or 'commercialmerged' in processed_sheets:
+                    indi = processed_sheets.get('consumermerged', pd.DataFrame())
+                    corpo = processed_sheets.get('commercialmerged', pd.DataFrame())
+                else:
+                    consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
+                    comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
+                    credit = processed_sheets.get('creditinformation', pd.DataFrame())
+                    guar = processed_sheets.get('guarantorsinformation', pd.DataFrame())
+                    prin = processed_sheets.get('principalofficerstemplate', pd.DataFrame())
+                    indi = merge_individual_borrowers(consu, credit, guar)
+                    corpo = merge_corporate_borrowers(comm, credit, prin)
 
                 # Split commercial entities from individual borrowers (candidates for manual review)
                 split_indi, split_candidates_commercial = split_commercial_entities(indi)
