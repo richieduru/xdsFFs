@@ -80,7 +80,7 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 250px;
+            max-width: 400px;
             vertical-align: middle;
             border-bottom: 1px solid #f1f1f1;
         }
@@ -137,13 +137,15 @@
 
         <div class="card">
             <div class="card-header">
-                <h4>Potential Commercial Entities <span class="fw-normal">• {{ commercial_candidates|length }} records</span></h4>
+                <h4>Potential Commercial Entities in Consumer Records <span class="fw-normal">• {{ commercial_candidates|length }} records</span></h4>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th style="width: 50px;"></th> 
+                            <th style="width: 50px;">
+                                <input type="checkbox" id="select-all-commercial" class="form-check-input" title="Select All Commercial" />
+                            </th> 
                             {% for col in columns_commercial %}
                                 <th>{{ col|title }}</th>
                             {% endfor %}
@@ -154,7 +156,7 @@
                         <tr>
                             <td class="text-center"><input type="checkbox" class="form-check-input" name="commercial_move_{{ forloop.counter0 }}" value="1"></td>
                             {% for col in columns_commercial %}
-                                <td>{{ row|get_item:col }}</td>
+                                <td title="{{ row|get_item:col }}">{{ row|get_item:col }}</td>
                             {% endfor %}
                         </tr>
                         {% empty %}
@@ -167,13 +169,15 @@
 
         <div class="card">
             <div class="card-header">
-                <h4>Potential Consumer Entities <span class="fw-normal">• {{ consumer_candidates|length }} records</span></h4>
+                <h4>Potential Consumer Entities in Commercial Records <span class="fw-normal">• {{ consumer_candidates|length }} records</span></h4>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                      <thead>
                         <tr>
-                            <th style="width: 50px;"></th>
+                            <th style="width: 50px;">
+                                <input type="checkbox" id="select-all-consumer" class="form-check-input" title="Select All Consumer" />
+                            </th>
                             {% for col in columns_consumer %}
                                 <th>{{ col|title }}</th>
                             {% endfor %}
@@ -184,7 +188,7 @@
                         <tr>
                             <td class="text-center"><input type="checkbox" class="form-check-input" name="consumer_move_{{ forloop.counter0 }}" value="1"></td>
                             {% for col in columns_consumer %}
-                                <td>{{ row|get_item:col }}</td>
+                                <td title="{{ row|get_item:col }}">{{ row|get_item:col }}</td>
                             {% endfor %}
                         </tr>
                         {% empty %}
@@ -209,6 +213,11 @@
 
 
 <script>
+function updateSelectedCount() {
+    var count = $('tbody input[type="checkbox"]:checked').length;
+    $('#selected-count').text(count);
+}
+
 function submitVerificationForm() {
     $('#spinner-overlay').show();
 
@@ -245,11 +254,43 @@ $(document).ready(function() {
         submitVerificationForm();
     });
 
-    // The JS now only listens for clicks on checkboxes within the table body
+    // Update count on individual checkbox change
     $('tbody input[type="checkbox"]').on('change', function() {
-        var count = $('tbody input[type="checkbox"]:checked').length;
-        $('#selected-count').text(count);
+        updateSelectedCount();
     });
+
+    // Select All for Commercial
+    $('#select-all-commercial').on('change', function() {
+        var checked = $(this).is(':checked');
+        $('input[name^="commercial_move_"]').prop('checked', checked);
+        updateSelectedCount();
+    });
+    // Uncheck 'Select All' if any commercial unchecked
+    $('input[name^="commercial_move_"]').on('change', function() {
+        var allChecked = $('input[name^="commercial_move_"]').length === $('input[name^="commercial_move_"]:checked').length;
+        $('#select-all-commercial').prop('checked', allChecked);
+    });
+
+    // Select All for Consumer
+    $('#select-all-consumer').on('change', function() {
+        var checked = $(this).is(':checked');
+        $('input[name^="consumer_move_"]').prop('checked', checked);
+        updateSelectedCount();
+    });
+    // Uncheck 'Select All' if any consumer unchecked
+    $('input[name^="consumer_move_"]').on('change', function() {
+        var allChecked = $('input[name^="consumer_move_"]').length === $('input[name^="consumer_move_"]:checked').length;
+        $('#select-all-consumer').prop('checked', allChecked);
+    });
+
+    // Initialize 'Select All' state on page load
+    var allCommercialChecked = $('input[name^="commercial_move_"]').length > 0 && $('input[name^="commercial_move_"]').length === $('input[name^="commercial_move_"]:checked').length;
+    $('#select-all-commercial').prop('checked', allCommercialChecked);
+    var allConsumerChecked = $('input[name^="consumer_move_"]').length > 0 && $('input[name^="consumer_move_"]').length === $('input[name^="consumer_move_"]:checked').length;
+    $('#select-all-consumer').prop('checked', allConsumerChecked);
+
+    // Initial count
+    updateSelectedCount();
 });
 </script>
 
