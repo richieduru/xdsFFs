@@ -12,6 +12,10 @@
 
     <style>
         /* --- NEW: Light blue linear gradient background --- */
+        html, body {
+            height: 100%;
+            overflow: hidden; /* Prevent main page scroll */
+        }
         body {
             background: linear-gradient(to bottom, #e7f5ff, #ffffff);
             min-height: 100vh; /* Ensure gradient covers the full view height */
@@ -20,6 +24,9 @@
 
         .main-content {
             padding: 2rem;
+            height: 100vh;
+            overflow: hidden; /* Prevent main-content from scrolling */
+            margin-bottom: 80px;
         }
 
         .page-header {
@@ -102,7 +109,11 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 2rem;
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100vw;
+            z-index: 1000;
         }
 
         #spinner-overlay {

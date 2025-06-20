@@ -10,6 +10,7 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from .forms import ExcelUploadForm
 from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,CommToConsu, commercial_keywords,consumer_merged_mapping,commercial_merged_mapping
+from .filename_utils import generate_filename, generate_fallback_filename
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
 from word2number import w2n
@@ -17,6 +18,113 @@ from datetime import datetime
 import traceback
 from django.views.decorators.csrf import csrf_exempt
 import json
+
+
+def extract_subscriber_alias_from_filename(filename):
+    """
+    Extract subscriber alias from filename by removing date patterns
+    
+    Args:
+        filename (str): The filename to extract subscriber alias from
+        
+    Returns:
+        str: The subscriber alias without date information
+    """
+    if not filename:
+        return filename
+    
+    # Remove file extension
+    base_filename = filename
+    if '.' in base_filename:
+        base_filename = base_filename.rsplit('.', 1)[0]
+    
+    # Remove common date patterns
+    # Pattern 1: Remove YYYY_MM_DD format
+    base_filename = re.sub(r'[_\s]*\d{4}[_\s]*\d{1,2}[_\s]*\d{1,2}[_\s]*', '', base_filename)
+    
+    # Pattern 2: Remove Month_Year or Year_Month patterns
+    month_names = ['january', 'february', 'march', 'april', 'may', 'june',
+                   'july', 'august', 'september', 'october', 'november', 'december',
+                   'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec']
+    
+    for month_name in month_names:
+        # Remove month_year pattern (e.g., "may 2024", "may_2024")
+        pattern = rf'[_\s]*{month_name}[_\s]*\d{{4}}[_\s]*'
+        base_filename = re.sub(pattern, '', base_filename, flags=re.IGNORECASE)
+        
+        # Remove year_month pattern (e.g., "2024 may", "2024_may")
+        pattern = rf'[_\s]*\d{{4}}[_\s]*{month_name}[_\s]*'
+        base_filename = re.sub(pattern, '', base_filename, flags=re.IGNORECASE)
+    
+    # Clean up any trailing/leading spaces or underscores
+    base_filename = base_filename.strip(' _')
+    
+    # If nothing left, return original filename without extension
+    if not base_filename:
+        return filename.rsplit('.', 1)[0] if '.' in filename else filename
+    
+    return base_filename
+
+
+def extract_date_from_filename(filename):
+    """
+    Extract month and year from filename in various formats
+    
+    Args:
+        filename (str): The filename to extract date from
+        
+    Returns:
+        tuple: (month, year) as integers, or (None, None) if no date found
+    """
+    if not filename:
+        return None, None
+    
+    # Remove file extension
+    base_filename = filename.lower()
+    if '.' in base_filename:
+        base_filename = base_filename.rsplit('.', 1)[0]
+    
+    # Pattern 1: YYYY_MM_DD format (e.g., alekun_2024_03_31)
+    pattern1 = r'(\d{4})_(\d{1,2})_(\d{1,2})'
+    match1 = re.search(pattern1, base_filename)
+    if match1:
+        year, month, day = match1.groups()
+        return int(month), int(year)
+    
+    # Pattern 2: Month_Year format (e.g., alekun_may_2024, alekun_march_2024)
+    month_names = {
+        'january': 1, 'jan': 1,
+        'february': 2, 'feb': 2,
+        'march': 3, 'mar': 3,
+        'april': 4, 'apr': 4,
+        'may': 5,
+        'june': 6, 'jun': 6,
+        'july': 7, 'jul': 7,
+        'august': 8, 'aug': 8,
+        'september': 9, 'sep': 9, 'sept': 9,
+        'october': 10, 'oct': 10,
+        'november': 11, 'nov': 11,
+        'december': 12, 'dec': 12
+    }
+    
+    # Look for month name followed by year
+    for month_name, month_num in month_names.items():
+        pattern2 = rf'{month_name}[_\s]*?(\d{{4}})'
+        match2 = re.search(pattern2, base_filename)
+        if match2:
+            year = match2.group(1)
+            return month_num, int(year)
+    
+    # Pattern 3: Year_Month format (e.g., alekun_2024_may)
+    for month_name, month_num in month_names.items():
+        pattern3 = rf'(\d{{4}})[_\s]*?{month_name}'
+        match3 = re.search(pattern3, base_filename)
+        if match3:
+            year = match3.group(1)
+            return month_num, int(year)
+    
+    # No date pattern found
+    return None, None
 
 
 def create_empty_sheet(mapping_dict):
@@ -1161,7 +1269,7 @@ def fuzzy_map_state(state_name, state_dict):
                 matched_state = state_code
 
     # Define a threshold score (you can adjust this based on your requirements)
-    threshold_score = 50
+    threshold_score = 98
 
     # If the similarity score is above the threshold, return the corresponding state code
     if max_score >= threshold_score:
@@ -2665,6 +2773,10 @@ def upload_file(request):
         if form.is_valid():
             uploaded_file = request.FILES['file']
             original_filename = os.path.splitext(uploaded_file.name)[0]
+            
+            # Extract subscriber alias from filename by removing date patterns
+            subscriber_alias = extract_subscriber_alias_from_filename(original_filename)
+            
             fs = FileSystemStorage()
             filename = fs.save(uploaded_file.name, uploaded_file)
             file_path = os.path.join(settings.MEDIA_ROOT, filename)
@@ -2786,6 +2898,7 @@ def upload_file(request):
                 request.session['corpo'] = split_corpo.to_json(orient='split')
                 request.session['processing_stats'] = json.loads(json.dumps(processing_stats, default=convert_numpy))
                 request.session['original_filename'] = original_filename
+                request.session['subscriber_alias'] = subscriber_alias
                 # Reorder columns for consumer candidates
                 reordered_consumer_columns = reorder_consumer_columns(split_candidates_consumer.columns)
                 
@@ -2940,6 +3053,10 @@ def verify_split_decision(request):
         corpo = enforce_string_columns(corpo)
         processing_stats = request.session.get('processing_stats', [])
         original_filename = request.session.get('original_filename', 'output')
+        subscriber_alias = request.session.get('subscriber_alias', original_filename)
+        
+        # Extract date from filename for standardized naming
+        extracted_month, extracted_year = extract_date_from_filename(original_filename)
 
         # For commercial candidates: checked = move to corpo, unchecked = stay in indi
         move_to_corp_idx = [i for i, move in enumerate(commercial_moves) if move]
@@ -3018,8 +3135,18 @@ def verify_split_decision(request):
         total_corporate_records = len(corpo) if not corpo.empty else 0
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        indi_output_filename = f"{original_filename}_individual_borrowers_{timestamp}.xlsx"
-        corpo_output_filename = f"{original_filename}_corporate_borrowers_{timestamp}.xlsx"
+        
+        # Generate standardized filenames using new naming convention
+        indi_output_filename = generate_filename(subscriber_alias, 'excel', 'consumer', extracted_month, extracted_year)
+        corpo_output_filename = generate_filename(subscriber_alias, 'excel', 'commercial', extracted_month, extracted_year)
+        
+        # Use fallback naming if subscriber mapping fails
+        if not indi_output_filename:
+            indi_output_filename = generate_fallback_filename(original_filename, 'excel', 'consumer', timestamp)
+        if not corpo_output_filename:
+            corpo_output_filename = generate_fallback_filename(original_filename, 'excel', 'commercial', timestamp)
+        
+        # For full processed file, use original naming for now (can be updated later if needed)
         full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
         excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
         excel_individual_dir = os.path.join(excel_dir, 'individual')
@@ -3043,9 +3170,17 @@ def verify_split_decision(request):
             indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
             corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
         full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
-        # TXT versions
-        indi_txt_filename = f"{original_filename}_individual_borrowers_{timestamp}.txt"
-        corpo_txt_filename = f"{original_filename}_corporate_borrowers_{timestamp}.txt"
+        # TXT versions - Generate standardized filenames using new naming convention
+        indi_txt_filename = generate_filename(subscriber_alias, 'txt', 'consumer', extracted_month, extracted_year)
+        corpo_txt_filename = generate_filename(subscriber_alias, 'txt', 'commercial', extracted_month, extracted_year)
+        
+        # Use fallback naming if subscriber mapping fails
+        if not indi_txt_filename:
+            indi_txt_filename = generate_fallback_filename(original_filename, 'txt', 'consumer', timestamp)
+        if not corpo_txt_filename:
+            corpo_txt_filename = generate_fallback_filename(original_filename, 'txt', 'commercial', timestamp)
+        
+        # For full processed file, use original naming for now (can be updated later if needed)
         full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
         txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
         os.makedirs(txt_dir, exist_ok=True)
