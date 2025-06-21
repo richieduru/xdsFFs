@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+
+{% block title %}Login{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  .login-container {
+    max-width: 450px;
+    margin: 2rem auto;
+    background: #ffffff;
+    padding: 2.5rem;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    border: 1px solid #e0e0e0;
+  }
+  
+  .login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  
+  .login-icon {
+    font-size: 2.5rem;
+    color: #0d6efd;
+    margin-bottom: 1rem;
+  }
+  
+  .login-title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #212529;
+  }
+  
+  .input-group-text {
+    background-color: #f8f9fa;
+    border-right: none;
+    color: #6c757d;
+  }
+  
+  .form-control {
+    border-left: none;
+  }
+  
+  .form-control:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+  }
+  
+  .form-control:focus + .input-group-text {
+    border-color: #86b7fe;
+  }
+  
+  .btn-login {
+    background-color: #0d6efd;
+    color: white;
+    font-weight: 500;
+    padding: 0.75rem;
+    font-size: 1.1rem;
+    border: none;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+    width: 100%;
+  }
+  
+  .btn-login:hover {
+    background-color: #0b5ed7;
+    transform: translateY(-1px);
+  }
+  
+  .admin-link {
+    display: block;
+    text-align: center;
+    margin-top: 1.5rem;
+    color: #6c757d;
+    text-decoration: none;
+    transition: color 0.3s ease;
+    font-size: 0.95rem;
+  }
+  
+  .admin-link:hover {
+    color: #0d6efd;
+    text-decoration: none;
+  }
+  
+  .form-label {
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 0.5rem;
+  }
+  
+  .alert {
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
+    <div class="col-12 col-md-8 col-lg-6 col-xl-5">
+      <div class="login-container">
+        <div class="login-header">
+          <div class="login-icon">
+            <i class="fas fa-sign-in-alt"></i>
+          </div>
+          <h1 class="login-title">Sign In</h1>
+          <p class="text-muted">Enter your credentials to access your account</p>
+        </div>
+
+        {% if form.errors %}
+        <div class="alert alert-danger">
+          <i class="fas fa-exclamation-circle me-2"></i>
+          Your username and password didn't match. Please try again.
+        </div>
+        {% endif %}
+
+        <form method="post" action="{% url 'acctmgt:login' %}" class="mb-4">
+          {% csrf_token %}
+
+          <div class="mb-4">
+            <label for="id_username" class="form-label">Username</label>
+            <div class="input-group">
+              <input
+                type="text"
+                name="username"
+                class="form-control"
+                id="id_username"
+                placeholder="Enter your username"
+                required
+                autofocus
+              />
+              <span class="input-group-text">
+                <i class="fas fa-user"></i>
+              </span>
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="id_password" class="form-label">Password</label>
+            <div class="input-group">
+              <input
+                type="password"
+                name="password"
+                class="form-control"
+                id="id_password"
+                placeholder="Enter your password"
+                required
+              />
+              <span class="input-group-text">
+                <i class="fas fa-lock"></i>
+              </span>
+            </div>
+          </div>
+
+          <div class="d-grid mt-4">
+            <button type="submit" class="btn btn-login">
+              <i class="fas fa-sign-in-alt me-2"></i>Sign In
+            </button>
+          </div>
+
+          <input type="hidden" name="next" value="{{ next }}" />
+        </form>
+        
+        <a href="{% url 'admin:index' %}" class="admin-link">
+          <i class="fas fa-cog me-2"></i>Access Admin Panel
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

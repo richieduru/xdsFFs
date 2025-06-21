@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.shortcuts import render, redirect
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from .forms import ExcelUploadForm
 from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,CommToConsu, commercial_keywords,consumer_merged_mapping,commercial_merged_mapping
 from .filename_utils import generate_filename, generate_fallback_filename
@@ -2767,6 +2768,9 @@ def convert_numpy(obj):
         return obj.tolist()
     return obj
 
+from django.contrib.auth.decorators import login_required
+
+@login_required
 def upload_file(request):
     if request.method == 'POST':
         form = ExcelUploadForm(request.POST, request.FILES)
@@ -3028,6 +3032,8 @@ def transform_to_consumer(df):
     return df_copy
 
 
+
+@login_required
 def verify_split_decision(request):
     if request.method == 'POST':
         # Validate required session keys exist

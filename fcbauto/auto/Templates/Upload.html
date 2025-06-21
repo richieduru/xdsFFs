@@ -1,143 +1,472 @@
+{% extends 'base.html' %}
 {% load static %}
 
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Upload File</title>
-    <link rel="stylesheet" href="{% static 'auto/css/style.css' %}" />
-    <link
-      rel="stylesheet"
-      href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
-    />
-  </head>
-  <body>
-    <div class="main-container">
-      <img
-        src="{% static 'auto/images/FirstCentralAPPROVEDLogo.png' %}"
-        alt="Image Description"
-      />
-      <h2>Excel File Upload</h2>
-      <form
-      method="post"
-      enctype="multipart/form-data"
-      class="upload-form"
-      id="uploadForm"
-      {% if success_message %}style="display: none;"{% endif %}
-      >
-        {% csrf_token %} {{ form.as_p }}
-        <button type="submit" class="btn btn-primary">Upload File</button>
-      </form>
+{% block title %}Data Processing Suite{% endblock %}
 
-      {% if success_message %}
-      <div class="alert alert-success mt-3">
-        {{ success_message }}
-        <!-- Processing Statistics -->
-        <div class="mb-4">
-          <h5>Processing Details:</h5>
-          <table class="table table-sm table-bordered">
-            <thead class="thead-light">
-              <tr>
-                <th>Sheet</th>
-                <th>Initial Columns</th>
-                <th>Initial Records</th>
-                <th>Valid Records</th>
-                <th>Processed Columns</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for stat in processing_stats %}
-              <tr>
-                <td>{{ stat.sheet_name }}</td>
-                <td>{{ stat.initial_columns }}</td>
-                <td>{{ stat.initial_records }}</td>
-                <td>{{ stat.valid_records }}</td>
-                <td>{{ stat.processed_columns }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+{% block extra_css %}
+<style>
+  .content-wrapper {
+    max-width: 900px;
+    margin: 2rem auto;
+  }
 
-        <!-- Merged Records Summary -->
-        <div class="mb-4">
-          <h5>Merged Records:</h5>
-          <div class="row">
-            <div class="col-md-6">
-              <div class="card bg-light mb-3">
-                <div class="card-body">
-                  <h5 class="card-title">Individual Borrowers</h5>
-                  <p class="card-text display-4">{{ total_individual }}</p>
-                </div>
-              </div>
-            </div>
-            <div class="col-md-6">
-              <div class="card bg-light mb-3">
-                <div class="card-body">
-                  <h5 class="card-title">Corporate Borrowers</h5>
-                  <p class="card-text display-4">{{ total_corporate }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  .tabs {
+    display: flex;
+    margin-bottom: -1px; /* Overlap with card border */
+    position: relative;
+    z-index: 1;
+  }
 
-        <div class="download-section">
-          {% if individual_download_url %}
-          <a
-            href="{{ individual_download_url }}"
-            class="btn btn-success"
-            download
-          >
-            <i class="fas fa-download"></i> Individual Borrowers
-          </a>
-          {% endif %} {% if corporate_download_url %}
-          <a href="{{ corporate_download_url }}" class="btn btn-info" download>
-            <i class="fas fa-download"></i> Corporate Borrowers
-          </a>
-          {% endif %} {% if full_download_url %}
-          <a href="{{ full_download_url }}" class="btn btn-secondary" download>
-            <i class="fas fa-download"></i> Full Processed File
-          </a>
-          {% endif %}
-        </div>
-        {% comment %} TXT GENERATION {% endcomment %}
-        <div class="download-section">
-          {% if individual_txt_url %}
-          <a
-            href="{{ individual_txt_url }}"
-            class="btn btn-outline-success"
-            download
-          >
-            <i class="fas fa-file-alt"></i> Individual (TXT)
-          </a>
-          {% endif %} {% if corporate_txt_url %}
-          <a
-            href="{{ corporate_txt_url }}"
-            class="btn btn-outline-info"
-            download
-          >
-            <i class="fas fa-file-alt"></i> Corporate (TXT)
-          </a>
-          {% endif %} {% if full_txt_url %}
-          <a
-            href="{{ full_txt_url }}"
-            class="btn btn-outline-secondary"
-            download
-          >
-            <i class="fas fa-file-alt"></i> Full Processed (TXT)
-          </a>
-          {% endif %}
-        </div>
+  .tab-link {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    color: #0d6efd;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid #e0e0e0;
+    background-color: #ffffff;
+    border-radius: 8px 8px 0 0;
+    margin-right: 5px;
+    border-bottom: none;
+  }
 
-        <a href="{% url 'upload_file' %}" class="btn btn-secondary mt-3"
-          >Upload New File</a
-        >
-      </div>
-      {% endif %} {% if error_message %}
-      <div class="alert alert-danger mt-3">{{ error_message }}</div>
-      {% endif %}
+  .tab-link.inactive {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+    color: #6c757d;
+  }
+
+  /* Main Upload Card Styling */
+  .upload-container {
+    background: #ffffff;
+    padding: 3rem;
+    border-radius: 0 15px 15px 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    text-align: center;
+    border: 1px solid #e0e0e0;
+  }
+
+  .file-upload-icon-wrapper {
+      margin-bottom: 1.5rem;
+      display: inline-block;
+      padding: 1.25rem;
+      background-color: #e9f5ff;
+      border-radius: 8px;
+  }
+
+  .file-upload-icon {
+    font-size: 2.5rem;
+    color: #0d6efd;
+  }
+
+  .upload-container h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .upload-container p {
+    color: #6c757d;
+    margin-bottom: 2.5rem;
+  }
+
+  /* Drag & Drop Area Styling */
+  .drag-drop-area {
+    border: 2px dashed #d0d5dd;
+    border-radius: 8px;
+    padding: 2.5rem 1.5rem;
+    background-color: #f8f9fa;
+    margin-bottom: 2.5rem;
+    cursor: pointer;
+    transition: border-color 0.3s, background-color 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    min-height: 200px;
+  }
+
+  .drag-drop-area:hover, .drag-drop-area.is-dragover {
+      border-color: #0d6efd;
+      background-color: #f0f6ff;
+  }
+
+  .drag-drop-icon {
+      font-size: 2rem;
+      color: #8c9db1;
+      margin-bottom: 1rem;
+  }
+
+  .file-upload-text {
+      font-weight: 600;
+      color: #344054;
+  }
+
+  .file-upload-hint {
+    color: #6c757d;
+    font-size: 0.9rem;
+  }
+  
+  #file-display-area {
+      display: none; /* Hidden by default */
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: #198754; /* Success green */
+      font-size: 1.1rem;
+      font-weight: 500;
+  }
+
+  #file-display-area .fa-check-circle {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+  }
+
+  #id_file {
+    display: none;
+  }
+
+  .btn-upload-file {
+      background: #0d6efd;
+      color: white;
+      border: none;
+      padding: 0.85rem 2rem;
+      border-radius: 8px;
+      font-weight: 500;
+      width: 100%;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(13, 110, 253, 0.2);
+  }
+
+  .btn-upload-file:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(13, 110, 253, 0.3);
+  }
+  
+  /* ================================================= */
+  /* === NEWLY ADDED AND CORRECTED SPINNER STYLES ==== */
+  /* ================================================= */
+
+  /* This defines the spinning animation. It must be present. */
+  @keyframes spinner-rotate {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* 1. We make the button a flex container to easily center its content. */
+  .btn-upload-file {
+      background: #0d6efd;
+      color: white;
+      border: none;
+      padding: 0.85rem 2rem;
+      border-radius: 8px;
+      font-weight: 500;
+      width: 100%;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(13, 110, 253, 0.2);
+      
+      /* Flexbox properties for centering */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      /* Define a min-height to prevent the button from collapsing */
+      min-height: 51px;
+  }
+
+  .btn-upload-file:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(13, 110, 253, 0.3);
+  }
+
+  /* 2. The spinner is hidden by default. No absolute positioning needed. */
+  #uploadButton .spinner-border {
+    display: none;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 0.2em solid #ffffff; /* White to show up on the blue button */
+    border-radius: 50%;
+    border-right-color: transparent; /* Creates the "gap" for the spinning look */
+    
+    /* Apply the animation we defined above */
+    animation: spinner-rotate 0.75s linear infinite;
+  }
+
+  /* 3. When the 'is-loading' class is added... */
+  #uploadButton.is-loading {
+    pointer-events: none;
+  }
+  
+  /* ...hide the button's original text content... */
+  #uploadButton.is-loading .button-content {
+    display: none;
+  }
+  
+  /* ...and show the spinner. */
+  #uploadButton.is-loading .spinner-border {
+    display: block;
+  }
+
+  /* (Keep all other existing styles for results page, etc.) */
+  .results-wrapper { background: white; border-radius: 0 8px 8px 8px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e0e0e0; }
+  .success-alert { background-color: #e6f9f0; color: #198754; border: 1px solid #a3e9c7; border-radius: 6px; padding: 1rem; display: flex; align-items: center; gap: 0.75rem; font-weight: 500; }
+  .stat-card-row { display: flex; gap: 1.5rem; margin: 1.5rem 0; }
+  .stat-card { flex: 1; background: #ffffff; border-radius: 8px; padding: 1.5rem; border: 1px solid #dee2e6; display: flex; align-items: center; gap: 1rem; }
+  .stat-card .icon { font-size: 1.5rem; padding: 0.75rem; border-radius: 6px; }
+  .stat-card .icon.individual { background-color: #e9f5ff; color: #0d6efd; }
+  .stat-card .icon.corporate { background-color: #fff4e6; color: #fd7e14; }
+  .stat-card .count { font-size: 2.25rem; font-weight: 600; color: #212529; }
+  .stat-card .label { font-size: 0.9rem; color: #6c757d; font-weight: 500; text-transform: uppercase; margin-bottom: 0.25rem; }
+  .stat-card .status { font-size: 0.8rem; color: #198754; }
+  .section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: #343a40; }
+  .processing-table { font-size: 0.9rem; }
+  .processing-table th { font-weight: 600; color: #6c757d; text-transform: uppercase; background-color: #f8f9fa; }
+  .download-section { margin-top: 2rem; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 8px; }
+  .download-category { margin-bottom: 1.5rem; }
+  .download-category:last-child { margin-bottom: 0; }
+  .download-category h5 { font-weight: 600; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+  .download-buttons { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .btn-download { flex: 1; min-width: 150px; text-align: center; padding: 0.6rem 1rem; text-decoration: none; border-radius: 6px; font-weight: 500; border: 1px solid; }
+  .btn-download.individual { background-color: #0d6efd; color: white; border-color: #0d6efd; }
+  .btn-download.corporate { background-color: #fd7e14; color: white; border-color: #fd7e14; }
+  .btn-download.full { background-color: #6c757d; color: white; border-color: #6c757d; }
+  .btn-download-txt { background: transparent; }
+  .btn-download-txt.individual { color: #0d6efd; border-color: #0d6efd; }
+  .btn-download-txt.corporate { color: #fd7e14; border-color: #fd7e14; }
+  .btn-download-txt.full { color: #6c757d; border-color: #6c757d; }
+  .btn-download-txt:hover { background-color: #f8f9fa; }
+  .btn-upload-new { background-color: #f8f9fa; border: 1px solid #dee2e6; color: #212529; font-weight: 500; padding: 0.6rem 1.5rem; border-radius: 6px; text-decoration: none; }
+  
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+    <div class="tabs">
+        <a href="{% url 'auto:upload' %}" class="tab-link {% if success_message %}inactive{% endif %}"><i class="fas fa-upload"></i> Upload File</a>
+        <a href="#" class="tab-link {% if not success_message %}inactive{% endif %}"><i class="fas fa-poll"></i> View Results</a>
     </div>
-  </body>
-</html>
+
+    {% if not success_message and not error_message %}
+    <div class="upload-container">
+        <div class="file-upload-icon-wrapper">
+            <i class="fas fa-file-alt file-upload-icon"></i>
+        </div>
+        <h2>Excel File Upload</h2>
+        <p>Upload your Excel file to process borrower data</p>
+        <form id="uploadForm" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            
+            <div class="drag-drop-area" onclick="document.getElementById('id_file').click()">
+                <div id="upload-prompt">
+                    <div class="drag-drop-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                    <div class="file-upload-text"><strong>Choose File</strong> or drag and drop</div>
+                    <div class="file-upload-hint">Excel files only (.xlsx, .xls)</div>
+                </div>
+                <div id="file-display-area">
+                    <div class="fa-stack fa-2x">
+                        <i class="fas fa-file-alt fa-stack-1x"></i>
+                        <i class="fas fa-check fa-stack-1x" style="color: #198754; margin-left: 1.5em; margin-top: 0.8em; font-size: 0.6em;"></i>
+                    </div>
+                    <span id="file-name-text" class="mt-2"></span>
+                </div>
+                <input type="file" name="file" id="id_file" accept=".xlsx,.xls">
+            </div>
+
+            <button type="submit" class="btn btn-upload-file" id="uploadButton">
+                <span class="button-content">
+                    <i class="fas fa-upload me-2"></i>Upload File
+                </span>
+                <span class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </span>
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if success_message %}
+    <div class="results-wrapper">
+        <div class="success-alert">
+            <i class="fas fa-check-circle fa-lg"></i>
+            <span><strong>File processed and merged successfully!</strong> Your data has been processed and is ready for download.</span>
+        </div>
+        <div class="stat-card-row">
+            <div class="stat-card">
+                <div class="icon individual"><i class="fas fa-user"></i></div>
+                <div>
+                    <div class="label">Individual Borrowers</div>
+                    <div class="count">{{ total_individual|default:"0" }}</div>
+                    <div class="status"><i class="fas fa-check"></i> Processed successfully</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="icon corporate"><i class="fas fa-building"></i></div>
+                <div>
+                    <div class="label">Corporate Borrowers</div>
+                    <div class="count">{{ total_corporate|default:"0" }}</div>
+                    <div class="status"><i class="fas fa-check"></i> Processed successfully</div>
+                </div>
+            </div>
+        </div>
+        <div class="processing-details mt-4">
+            <h4 class="section-title">Processing Details</h4>
+            <p class="text-muted" style="font-size: 0.9rem;">Detailed breakdown of file processing results</p>
+            <div class="table-responsive">
+                <table class="table table-borderless processing-table">
+                    <thead>
+                        <tr>
+                            <th>SHEET</th>
+                            <th>INITIAL COLUMNS</th>
+                            <th>INITIAL RECORDS</th>
+                            <th>VALID RECORDS</th>
+                            <th>PROCESSED COLUMNS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for stat in processing_stats %}
+                        <tr>
+                            <td><strong>{{ stat.sheet_name }}</strong></td>
+                            <td>{{ stat.initial_columns }}</td>
+                            <td>{{ stat.initial_records }}</td>
+                            <td>{{ stat.valid_records }}</td>
+                            <td>{{ stat.processed_columns }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="download-section">
+            <div class="download-category">
+                <h5><i class="fas fa-file-excel"></i> Excel Files (.xlsx)</h5>
+                <div class="download-buttons">
+                    <a href="{{ individual_download_url }}" class="btn-download individual" download>Individual Borrowers</a>
+                    <a href="{{ corporate_download_url }}" class="btn-download corporate" download>Corporate Borrowers</a>
+                    <a href="{{ full_download_url }}" class="btn-download full" download>Full Processed File</a>
+                </div>
+            </div>
+            <div class="download-category">
+              <h5><i class="fas fa-file-alt"></i> Text Files (.txt)</h5>
+              <div class="download-buttons">
+                  <a href="{{ individual_txt_url }}" class="btn-download individual" download>Individual (TXT)</a>
+                  <a href="{{ corporate_txt_url }}" class="btn-download corporate" download>Corporate (TXT)</a>
+                  <a href="{{ full_txt_url }}" class="btn-download full" download>Full Processed (TXT)</a>
+              </div>
+           </div>
+        </div>
+        <div class="text-center mt-4">
+             <a href="{% url 'auto:upload' %}" class="btn btn-upload-new"><i class="fas fa-plus me-2"></i>Upload New File</a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if error_message %}
+    <div class="alert alert-danger mt-4" style="max-width: 900px; margin: 1rem auto;">
+        <i class="fas fa-exclamation-triangle me-2"></i>{{ error_message }}
+    </div>
+    {% endif %}
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('id_file');
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadButton = document.getElementById('uploadButton');
+    const dragDropArea = document.querySelector('.drag-drop-area');
+
+    if (fileInput) {
+        const updateFileDisplay = () => {
+            const uploadPrompt = document.getElementById('upload-prompt');
+            const fileDisplayArea = document.getElementById('file-display-area');
+            const fileNameText = document.getElementById('file-name-text');
+
+            if (fileInput.files && fileInput.files.length > 0) {
+                uploadPrompt.style.display = 'none';
+                fileNameText.textContent = fileInput.files[0].name;
+                fileDisplayArea.style.display = 'flex';
+            } else {
+                uploadPrompt.style.display = 'flex';
+                fileDisplayArea.style.display = 'none';
+            }
+        };
+        
+        fileInput.onchange = updateFileDisplay;
+
+        if (dragDropArea) {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dragDropArea.addEventListener(eventName, e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, false);
+            });
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dragDropArea.addEventListener(eventName, () => dragDropArea.classList.add('is-dragover'), false);
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                dragDropArea.addEventListener(eventName, () => dragDropArea.classList.remove('is-dragover'), false);
+            });
+            dragDropArea.addEventListener('drop', e => {
+                if (e.dataTransfer.files.length) {
+                    fileInput.files = e.dataTransfer.files;
+                    updateFileDisplay();
+                }
+            }, false);
+        }
+    }
+
+    if (uploadForm && uploadButton) {
+        uploadForm.addEventListener('submit', function(e) {
+            // 1. Prevent the default form submission which reloads the page
+            e.preventDefault();
+
+            // 2. Check if a file is actually selected
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('Please choose a file to upload.');
+                return;
+            }
+
+            // 3. Show the loading animation
+            uploadButton.classList.add('is-loading');
+            uploadButton.disabled = true;
+
+            // 4. Create FormData to send the file and CSRF token
+            const formData = new FormData(uploadForm);
+
+            // 5. Use the Fetch API to send data asynchronously
+            fetch(uploadForm.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    // The CSRF token is already in formData, but it's good practice
+                    // for some JS frameworks to also send it in the header.
+                    'X-CSRFToken': formData.get('csrfmiddlewaretoken'),
+                }
+            })
+            .then(response => response.text()) // Get the server's response as HTML text
+            .then(html => {
+                // 6. Replace the entire page content with the new HTML from the server
+                document.open();
+                document.write(html);
+                document.close();
+            })
+            .catch(error => {
+                // 7. Handle network errors
+                console.error('Upload Error:', error);
+                alert('An error occurred during the upload. Please try again.');
+                // Revert the button to its original state on error
+                uploadButton.classList.remove('is-loading');
+                uploadButton.disabled = false;
+            });
+        });
+    }
+});
+</script>
+{% endblock %}
