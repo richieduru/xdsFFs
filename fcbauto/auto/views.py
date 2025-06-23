@@ -930,7 +930,14 @@ def process_special_characters(df):
                         x.endswith('@gmail.com') or 
                         x.endswith('@yahoo.com')) or 
                         # x.endswith('.co.uk')) or 
-                        x.endswith('.com') 
+                        x.endswith('.com') or
+                        x.endswith('.ng') or
+                        x.endswith('.net') or
+                        x.endswith('.org') or
+                        x.endswith('.biz') or
+                        x.endswith('.info') or
+                        # x.endswith('.co.uk') or
+                        x.endswith('.us')
                 else ''
                 )
             except Exception as e:
@@ -2802,12 +2809,15 @@ def upload_file(request):
                     xds[sheet_name] = df
                 processed_sheets = ensure_all_sheets_exist(xds)
                 for sheet_name, sheet_data in xds.items():
+                    print(f"\n[DEBUG] Original headers in uploaded file for sheet '{sheet_name}': {list(sheet_data.columns)}")
                     cleaned_name = clean_sheet_name(sheet_name)
                     cleaned_df = sheet_data.copy()
                     cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill','NA'], '', inplace=True)
+                    print(f"[DEBUG] Headers after pandas loads the file: {list(cleaned_df.columns)}")
                     cleaned_df.columns = [str(col).upper().strip() for col in cleaned_df.columns]
                     cleaned_df = preprocess_tenor_from_headers(cleaned_df)
                     cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
+                    print(f"[DEBUG] Headers after cleaning: {list(cleaned_df.columns)}")
                     if cleaned_name == 'individualborrowertemplate':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consu_mapping)
                     elif cleaned_name == 'corporateborrowertemplate':
@@ -3223,4 +3233,19 @@ def verify_split_decision(request):
         })
     else:
         return render(request, 'upload.html', {'form': ExcelUploadForm(), 'error_message': 'Invalid request.'})
+
+def clean_and_deduplicate_columns(df):
+    """Clean column names and assign suffixes to duplicates after cleaning."""
+    cleaned_cols = [remove_special_characters(str(col)).upper().strip() for col in df.columns]
+    counts = {}
+    new_cols = []
+    for col in cleaned_cols:
+        if col in counts:
+            counts[col] += 1
+            new_cols.append(f"{col}{counts[col]}")
+        else:
+            counts[col] = 0
+            new_cols.append(col)
+    df.columns = new_cols
+    return df
 

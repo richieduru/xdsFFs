@@ -86,11 +86,11 @@ credit_mapping = {
         'LOANEFFECTIVEDATE': ['loaneffectivedate','dateofloandisbursement','Date of Loan disbursement','dateofloan','dateloandisbursedloaneffectivedate','dateofloanfacilitydisbursementloaneffectivedate','loaneffectivedate','dateofdisbursement','disbursementdate','dateaccountopened','dateopened','firstdisbdt','opendate','dateacctopenned','dateofmortgagefacilityapproval','effectdate','startdate','accountactivationfirstdisbursementdate','startdate','dteaccountopened','dateaccountopened','accountactivationfirstdisbursementdate','dateofdisbursement','acctopndate','effectivedate','loaneffectivedate','accountactivationfirstdisbursementdate','disbutiondate','dateofcreditfacilityapproval','approvaldatedateoffirstdisbursement','approvaldate','issdate','issuedate','tdate','facilityapprovaldate','firstdisburmentdate'],
         'DEFEREDPAYMENTDATE':['DEFEREDPAYMENTDATE','deferedpaymentdate'],
         'CREDITLIMIT': ['creditlimit','creditlimitfacilityamountgloballimit','facilityamount','globallimit','openbalfirstdisbursementamt','amountgranted','openbalancecreditlimit','openingbalance','sanctlim','loanamountorcreditlimitforoverdraftaccounts','creditlimitfacilityamountgloballimit','currentbalance','amountequity'],
-        'AVAILEDLIMIT': ['availedlimit','facilityamount','facilityamt','availedlimited','loanamount','loanfacilityamount','loanamountavailedlimit','loanfacilityamountavailedlimit','amountdisbursed','amountgranted','openingbalance','openbalance','loanfacilityamountavailedlimit','loanfacilityamount','approvedamt','amountdisbursedtilldate','approvedamount','openingbalance','amountgrantedcreditcardlimit','loanamountavailedlimit','principal','approvedamount','loanamt','amountapproved','loanamtloanamt','loanfacilityamountavailedlimit'],
-        'OUTSTANDINGBALANCE': ['outstandingbalance','accountbalance','openingbalance','currentbalance','accountbal','balcurr','currentbal','principaloutstandingamount','outstandingprincipal','clrbalamt','trandatebal','currentoutstandingbalance','currentoutstanding','accountbalancecreditbalance','balance','totaloutstanding','acctbalance'],
+        'AVAILEDLIMIT': ['availedlimit','facilityamount','facilityamt','availedlimited','loanamount','loanfacilityamount','loanamountavailedlimit','loanfacilityamountavailedlimit','loanfacilityamountavailedlimitngn','amountdisbursed','amountgranted','openingbalance','openbalance','loanfacilityamountavailedlimit','loanfacilityamount','approvedamt','amountdisbursedtilldate','approvedamount','openingbalance','amountgrantedcreditcardlimit','loanamountavailedlimit','principal','approvedamount','loanamt','amountapproved','loanamtloanamt','loanfacilityamountavailedlimit'],
+        'OUTSTANDINGBALANCE': ['outstandingbalance','outstandingbalancengn','accountbalance','openingbalance','currentbalance','accountbal','balcurr','currentbal','principaloutstandingamount','outstandingprincipal','clrbalamt','trandatebal','currentoutstandingbalance','currentoutstanding','accountbalancecreditbalance','balance','totaloutstanding','acctbalance'],
         'CURRENTBALANCEDEBITIND':['currentbalancedebitind'],
         'INSTALMENTAMOUNT': ['instalmentamount','installmentamount','installamtprincipal','instalmentamt','installmentamountprincipal','totalinstallmentamount','installmentamount','instalmentamountn','installmentalamountprincipalpaidsofar','instalmentprincipal'],
-        'CURRENCY': ['curency','currencycode','currency','currcode','currengncy'],
+        'CURRENCY': ['loanfacilitycurrency','curency','currencycode','currency','currcode','currengncy'],
         'DAYSINARREARS': ['daysinarrears','daysoverdue','monthsinarrears','dpdinmonths','montharrears','monthsarrears','daysoverdue','numberofdaysoverduemicrocreditfacility','daysinarrears','daysinarrears','numberofdaysoverduemicrocreditfacility','noofdaysoverdue','numberofdaysoverdue','daysareas','overduedaysprin'],
         'OVERDUEAMOUNT': ['overdueamount','overdueamtprn','amountoverdue','amountoverduearrearsamount','overdue'],
         'FACILITYTYPE': ['product','loantype','loanfacilitytype','accounttype','facilitytype','type','accounttypecode','typeofaccount','mortgagefacilitytype','customercategory','loanfacilitytype','transactiontypecode','schmtype','creditfacilitytype'],
@@ -385,7 +385,7 @@ commercial_merged_mapping = {
         'PRINCIPALOFFICER2PASSPORTNUMBER': ['principal officer2 passport no','principalofficer2passportno','passport no1','passportno1','PRINCIPALOFFICER2PASSPORTNUMBER','P2PASSPORT NO','DIRECTOR_2_PASSPORT_NUMBER','PASSPORT NO','PRINCIPAL OFFICER2 PASSPORT NO'],
         'PRINCIPALOFFICER2OTHERIDNUMBER':['principalofficer2otheridnumber','principal officer 2 other id number','principal officer2 other id number'],
         'PRINCIPALOFFICER2PHONENUMBER': ['phoneno11','principal officer2 phone number','principal officer2 phonenumber','principalofficer2phonenumber','principal officer2 phone no','principalofficer2phoneno','phonenumber11','phone number1','phonenumber11','phoneno11','phoneno1','phone no11','phoneno 11','PRINCIPALOFFICER2PHONENUMBER', 'P2PHONE NO1', 'PHONE NO 2','P_PHONE NO1','PRINCIPAL OFFICER2 PHONE NO1'],
-        'PRINCIPALOFFICER2EMAILADDRESS': ['PRINCIPALOFFICER2EMAILADDRESS','principalofficer2emailaddress','emailaddress1','email address1','emailaddress1','P2EMAIL ADDRESS','E-MAIL ADDRESS1','PRINCIPAL OFFICER2 E MAIL ADDRESS','email1'],
+        'PRINCIPALOFFICER2EMAILADDRESS': ['PRINCIPALOFFICER2EMAILADDRESS','principalofficer2emailaddress','emailaddress1','email address1','emailaddress1','P2EMAIL ADDRESS','E-MAIL ADDRESS1','PRINCIPAL OFFICER2 E MAIL ADDRESS','email1','emailaddress'],
         'PRINCIPALOFFICER2POSITIONINBUSINESS': ['positioninbusiness1','principal officer2 position in business','principalofficer2positioninbusiness','principalofficer2positioninbusiness1','position in business1''PRINCIPALOFFICER2POSITIONINBUSINESS','P2POSITION IN BUSINESS','PRINCIPAL OFFICER2 POSITION IN BUSINESS','Position In Business 2']
     }
 
@@ -1101,12 +1101,12 @@ Loan_dict = {'Commercial Overdraft': ['commercialoverdraft', '1', '01', '001', '
                  'Kafala -Guarantee':['kafalaguarantee','64','064']
                  }
 
-Repayment_dict = {'Weekly':['d','w','1','days','day','weekly','daily','01','001','day','week'],
-                  'Forthnightly':['f','2','forthnight','02','002','forth','forthnightly'],
-                  'Monthly':['m','month','monthly', '3','03','003'],
-                  'Quarterly':['q','quarter','quarterly','4','04','004'],
-                  '6 Months':['5','sixmonth','sixmonths','6months','6month','halfyear','half year','05','005'],
-                  'Yearly': ['y','yearly','year','6','06','006','one year','1year'],
+Repayment_dict = {'Weekly':['d','w','1','days','day','weekly','daily','01','001','day','week','wkly','wk'],
+                  'Forthnightly':['f','2','forthnight','02','002','forth','forthnightly','fortnightly'],
+                  'Monthly':['m','month','monthly', '3','03','003','mnthly','mnth','mtly','mth'],
+                  'Quarterly':['q','quarter','quarterly','4','04','004','quaterly'],
+                  '6 Months':['5','sixmonth','sixmonths','6months','6month','halfyear','half year','05','005','6 months'],
+                  'Yearly': ['y','yearly','year','6','06','006','one year','1year','yr','yrly'],
                   'Bullet':['b','bullet', '7','07','007']
 }
 Classification_dict = {'Performing':['001', 'performing','1','01','perform',"performingloansperformingadvances", "performing loans","performing advances"],
@@ -1426,7 +1426,7 @@ commercial_keywords = [
     "surveillance", "system", "systems", "tech", "technical", "technology", "textile", "tractor", "trade", "trading",'andycos',
     "trustee", "uniform", "union", "unipetrol", "united", "universal", "university", "vanguard", "venture", "ventures",
     "wardrob",  "washing", "weavers", "welder", "wholesale", "word", "workers", "workshop", "world",'secrets',"yescredit",'info','giants','fm','accounts','accountants','account','chancellors','chancellor',
-    "worldwide", "youth", "youths",'puroyals','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip','limikted','astroturf','mfb','catho','coopsociety','tradomedical','interbiz','greens','woodwork','woodworks','woodwork'
+    "worldwide", "youth", "youths",'puroyals','fertilizer','investiment','fishsellers','enterprisee','SEWING','GD','G G','S B M C','A U G','tindip','limikted','astroturf','mfb','catho','coopsociety','tradomedical','interbiz','greens','woodwork','woodworks','woodwork'
 ]
 
 subscriber_mappings = {
