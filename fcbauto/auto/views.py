@@ -288,7 +288,7 @@ def remove_titles(name):
         return name
     
     titles = [
-        'Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT','pastor',
+        'Miss', 'Mrs', 'Rev', 'Dr', 'Mr', 'MS', 'CAPT','pastor','doctor',
         'COL', 'LADY', 'MAJ', 'PST', 'PROF', 'REV', 'SGT',
         'SIR', 'HE', 'JUDG', 'CHF', 'ALHJ', 'APOS', 'CDR', 'ALH', 'Alh',
         'BISH', 'FLT', 'BARR', 'MGEN', 'GEN', 'HON', 'ENGR', 'LT', 'AND', 'and',
@@ -2357,8 +2357,11 @@ def split_consumer_entities(corpo):
             # Store the original name for records that might be sent back
             consumer_data['ORIGINAL_BUSINESSNAME'] = business_name
             
-            # Split the business name into a max of 3 parts
-            name_parts = business_name.split(maxsplit=2)
+            # Apply remove_titles function before splitting to clean titles
+            cleaned_business_name = remove_titles(business_name)
+            
+            # Split the cleaned business name into a max of 3 parts
+            name_parts = cleaned_business_name.split(maxsplit=2)
             
             # Assign name parts correctly
             consumer_data['SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
@@ -2879,6 +2882,7 @@ def upload_file(request):
                     cleaned_df = process_collateral_details(cleaned_df)
                     cleaned_df = positioninBusiness(cleaned_df)
                     cleaned_df = trim_strings_to_59(cleaned_df)
+                    cleaned_df = remove_duplicates(cleaned_df)
 
                     for stat in processing_stats:
                         if stat['sheet_name'] == sheet_name:
@@ -3097,7 +3101,9 @@ def verify_split_decision(request):
                 # Split the original business name back into individual components
                 for idx, row in unchecked_commercial.iterrows():
                     if pd.notna(row['ORIGINAL_BUSINESSNAME']):
-                        name_parts = str(row['ORIGINAL_BUSINESSNAME']).split(maxsplit=2)
+                        # Apply remove_titles function before splitting to clean titles
+                        cleaned_business_name = remove_titles(str(row['ORIGINAL_BUSINESSNAME']))
+                        name_parts = cleaned_business_name.split(maxsplit=2)
                         unchecked_commercial.at[idx, 'SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
                         unchecked_commercial.at[idx, 'FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
                         unchecked_commercial.at[idx, 'MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
@@ -3137,8 +3143,7 @@ def verify_split_decision(request):
         corpo = modify_middle_names(corpo)
 
 
-        indi = remove_duplicates(indi)
-        corpo = remove_duplicates(corpo)
+
 
 
         indi = clean_for_output(indi)
