@@ -19,6 +19,8 @@ from datetime import datetime
 import traceback
 from django.views.decorators.csrf import csrf_exempt
 import json
+from django.http import JsonResponse
+
 
 
 def extract_subscriber_alias_from_filename(filename):
@@ -246,9 +248,10 @@ def preprocess_tenor_from_headers(df):
             
             # Apply the multiplier to the column.
             # pd.to_numeric converts numbers; errors='coerce' handles non-numbers gracefully.
-            # .fillna(0) replaces any conversion errors with 0.
-            numeric_col = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
-            df_copy[col] = numeric_col * multiplier
+            # Convert to numeric, preserve empty values as empty strings
+            numeric_series = pd.to_numeric(df_copy[col], errors='coerce')
+            # Replace NaN with empty string, otherwise multiply by multiplier and convert to int then string
+            df_copy[col] = numeric_series.apply(lambda x: '' if pd.isna(x) else str(int(x * multiplier)))
     
     return df_copy
 
@@ -256,6 +259,26 @@ def clean_sheet_name(sheet_name):
     """Clean sheet names by removing special characters"""
     cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', sheet_name)  
     return cleaned_name.lower()
+
+def make_column_names_unique(df):
+    """
+    Checks for duplicate column names and makes them unique by adding a suffix.
+    e.g., [NAME, EMAIL, NAME] -> [NAME, EMAIL, NAME_1]
+    """
+    cols = list(df.columns)
+    seen = set()
+    for i, col in enumerate(cols):
+        if col in seen:
+            suffix = 1
+            while f"{col}_{suffix}" in seen:
+                suffix += 1
+            new_name = f"{col}_{suffix}"
+            cols[i] = new_name
+            seen.add(new_name)
+        else:
+            seen.add(col)
+    df.columns = cols
+    return df
 
 def remove_special_characters(column_name):
     """Remove special characters and all spaces from column names"""
@@ -995,16 +1018,16 @@ def process_passport_number(df):
             df[column_name] = df[column_name].apply(clean_passport)
 
     return df
+
+
 def process_identity_numbers(df):
     """
     Cleans the National Identity Number columns based on specified criteria.
     
     Updated Criteria:
-    - Each ID must be exactly 10 or 11 characters long. If the cleaned ID is not exactly 10 or 11 characters, it is discarded.
-    - The ID must either:
-      a) Start with two letters (case insensitive) immediately followed by a digit, OR
-      b) Be exactly 11 numeric digits (and not repetitive like 11111111111)
-    - If neither pattern is met, the ID is discarded.
+    - If an ID starts with "NIN" and is followed by numbers, the "NIN" is removed and the numbers are kept.
+    - An ID that is exactly 11 numeric digits (and not a repetitive pattern) is kept.
+    - An alphanumeric ID must be 10 or 11 characters long and start with two letters followed by a digit.
     
     Parameters:
         df (pd.DataFrame): The input DataFrame.
@@ -1026,21 +1049,22 @@ def process_identity_numbers(df):
             def clean_identity(identity):
                 # Convert the value to a string
                 identity_str = str(identity)
-                # Remove all non-alphanumeric characters (i.e., spaces and special characters)
+                # Remove all non-alphanumeric characters
                 identity_str = re.sub(r'[^a-zA-Z0-9]', '', identity_str)
-                
-                # Case 1: Check for purely numeric IDs that are exactly 11 digits
+
+                # NEW Check 1: Check for 'NIN' followed only by digits.
+                if re.match(r'^NIN\d+$', identity_str, re.IGNORECASE):
+                    # If it matches, remove the first 3 characters ('NIN') and return the rest.
+                    return identity_str[3:] 
+
                 if identity_str.isdigit() and len(identity_str) == 11:
-                    # Check if it's not a repetitive pattern (all same digit)
-                    if len(set(identity_str)) > 1:  # More than one unique digit
+                    if len(set(identity_str)) > 1:
                         return identity_str
-                    return ''  # Repetitive numeric pattern, discard
+                    return ''
                 
-                # Discard if the cleaned ID is not exactly 10 or 11 characters
                 if len(identity_str) not in [10, 11]:
                     return ''
                 
-                # Check that the ID starts with two letters followed immediately by a digit
                 if not re.match(r'^[a-zA-Z]{2}\d', identity_str):
                     return ''
                 
@@ -1086,23 +1110,24 @@ def process_tax_numbers(df):
     
     return df
 
+
 def process_DriversLicense(df):
     """
-    Cleans the Pendicomid columns based on specified criteria.
+    Cleans the Driver's License columns based on specified criteria.
     
     Updated Criteria:
-    - Each Pendicomid must be exactly 11 characters long. If the cleaned value is not exactly 11 characters, it is discarded.
-    - Each Pendicomid must start with three letters (case insensitive) immediately followed by a digit.
-      If the starting pattern is not met, the value is discarded.
+    - A license number starting with "LNO" (case-insensitive) is always kept, regardless of length.
+    - For all other formats, the value must be 10, 11, or 12 characters long after cleaning.
+    - Other formats must also start with three letters (case insensitive) immediately followed by a digit.
     
     Parameters:
         df (pd.DataFrame): The input DataFrame.
     
     Returns:
-        pd.DataFrame: The updated DataFrame with valid Pendicomid values retained.
+        pd.DataFrame: The updated DataFrame with valid Driver's License values retained.
     """
     
-    # List of Pendicomid columns to process
+    # List of Driver's License columns to process
     dLicense = [ 'DRIVERSLICENSENUMBER',
             'PRINCIPALOFFICER1DRIVERSLISCENCENUMBER',
             'PRINCIPALOFFICER2DRIVERSLISCENCENUMBER',
@@ -1116,19 +1141,27 @@ def process_DriversLicense(df):
                 # Remove all non-alphanumeric characters (i.e., spaces and special characters)
                 value_str = re.sub(r'[^a-zA-Z0-9]', '', value_str)
                 
+                # NEW: Add special check for license numbers starting with 'LNO'.
+                # This check is case-insensitive. If it matches, we keep the value and ignore other rules.
+                if value_str.upper().startswith('LNO'):
+                    return value_str
+                
+                # Check 1: Length must be 10, 11, or 12 characters.
                 if len(value_str) not in [10, 11, 12]:
                     return ''
                 
-                # Check that the value starts with three letters (case insensitive) immediately followed by a digit.
+                # Check 2: Must start with three letters followed by a digit.
                 if not re.match(r'^[a-zA-Z]{3}\d', value_str):
                     return ''
                 
                 return value_str
             
-            # Apply the cleaning function to the Pendicomid column
+            # Apply the cleaning function to the Driver's License column
             df[column_name] = df[column_name].apply(clean_driversLicense)
     
     return df
+
+
 def process_business_id(df):
     """
     Clears the values in the specified column where the values are not alphanumeric
@@ -1188,9 +1221,16 @@ def process_bvn_number(df):
                 bvn_str = str(bvn)
                 # Check if the length is 11 and if it's numeric
                 if len(bvn_str) == 11 and bvn_str.isdigit():
-                    # Check if all characters are identical
+                    # Check 1: Remove if all characters are identical (e.g., "22222222222")
+                    # This is still a useful check for junk data.
                     if bvn_str == bvn_str[0] * 11:
-                        return ''  # Remove if all characters are identical
+                        return ''
+                    
+                    # UPDATED Check 2: Enforce the rule that valid BVNs must be 20,000,000,000 or higher.
+                    # This will remove any BVN starting with '0' or '1'.
+                    if int(bvn_str) < 20000000000:
+                        return ''
+
                     return bvn_str  # Keep the valid BVN
                 return ''  # Remove if not 11 digits or not numeric
             
@@ -1198,7 +1238,6 @@ def process_bvn_number(df):
             df[column_name] = df[column_name].apply(clean_bvn)
 
     return df
-
 # ---------------------------------------------------------------REMODIFY THIS---------------------------------------------------------------------
 def process_otherid(df):
     """
@@ -1827,9 +1866,9 @@ def process_loan_tenor(df):
 
             df[col] = df[col].apply(convert_tenor_to_days)
             # Convert to numeric, handling any conversion errors
-            numeric_series = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            df[col] = np.ceil(numeric_series).astype(int)
-            df[col] = df[col].astype(str)
+            numeric_series = pd.to_numeric(df[col], errors='coerce')
+            # Replace NaN with empty string, otherwise convert to int then string
+            df[col] = numeric_series.apply(lambda x: '' if pd.isna(x) else str(int(np.ceil(x))))
         else:
             print(f"Column {col} not found in DataFrame.")
 
@@ -1838,6 +1877,7 @@ def process_loan_tenor(df):
 def try_convert_to_float(x):
     """
     Enhanced numeric conversion function to handle mixed alphanumeric values
+    and remove date-like strings.
     
     Args:
         x: Input value to convert
@@ -1851,6 +1891,16 @@ def try_convert_to_float(x):
     
     # Convert to string if not already and strip leading/trailing spaces
     x = str(x).strip()
+
+    # --- NEW: Check for common date string formats ---
+    # This regex looks for patterns like YYYY-MM-DD, DD/MM/YYYY, MM.DD.YY etc.
+    # It's designed to catch strings that are clearly dates and not ambiguous numbers.
+    # It uses start (^) and end ($) anchors to match the entire string.
+    date_pattern = re.compile(
+        r'^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2})|(?:\d{1,2}[-/]\d{1,2}[-/]\d{2,4})$'
+    )
+    if date_pattern.match(x):
+        return ''  # It's a date string, so clear it.
     
     # Remove specific special characters and leading/extra spaces
     x = re.sub(r'[-?]', '', x)  # Remove specific special characters
@@ -2820,7 +2870,9 @@ def upload_file(request):
                     cleaned_df.columns = [str(col).upper().strip() for col in cleaned_df.columns]
                     cleaned_df = preprocess_tenor_from_headers(cleaned_df)
                     cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
-                    print(f"[DEBUG] Headers after cleaning: {list(cleaned_df.columns)}")
+                    cleaned_df = make_column_names_unique(cleaned_df)
+                    cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
+                    print(f"[DEBUG] Headers after cleaning and making them: {list(cleaned_df.columns)}")
                     if cleaned_name == 'individualborrowertemplate':
                         cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consu_mapping)
                     elif cleaned_name == 'corporateborrowertemplate':
@@ -2994,7 +3046,6 @@ def reorder_consumer_columns(columns):
     # Return original order if we couldn't reorder
     return columns
 
-@csrf_exempt  # You may want to use proper CSRF handling in production
 def transform_to_commercial(df):
     """
     Transform individual records to commercial format.
@@ -3048,194 +3099,205 @@ def transform_to_consumer(df):
 
 
 @login_required
+@csrf_exempt
 def verify_split_decision(request):
     if request.method == 'POST':
+        try:
         # Validate required session keys exist
-        required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer', 'indi', 'corpo']
-        missing_keys = [key for key in required_session_keys if key not in request.session]
-        
-        if missing_keys:
-            messages.error(request, f'Session data missing: {missing_keys}. Please restart the process.')
-            return redirect('upload_file')
-        
-        # Get user checkbox moves from POST (lists of booleans)
-        commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
-        consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
-        
-        # Retrieve stored data from session
-        split_candidates_commercial = pd.read_json(request.session['split_candidates_commercial'], orient='split', dtype=str)
-        split_candidates_commercial = enforce_string_columns(split_candidates_commercial)
-        split_candidates_consumer = pd.read_json(request.session['split_candidates_consumer'], orient='split', dtype=str)
-        split_candidates_consumer = enforce_string_columns(split_candidates_consumer)
-        indi = pd.read_json(request.session['indi'], orient='split', dtype=str)
-        indi = enforce_string_columns(indi)
-        corpo = pd.read_json(request.session['corpo'], orient='split', dtype=str)
-        corpo = enforce_string_columns(corpo)
-        processing_stats = request.session.get('processing_stats', [])
-        original_filename = request.session.get('original_filename', 'output')
-        subscriber_alias = request.session.get('subscriber_alias', original_filename)
-        
-        # Extract date from filename for standardized naming
-        extracted_month, extracted_year = extract_date_from_filename(original_filename)
-
-        # For commercial candidates: checked = move to corpo, unchecked = stay in indi
-        move_to_corp_idx = [i for i, move in enumerate(commercial_moves) if move]
-        stay_in_indi_idx = [i for i, move in enumerate(commercial_moves) if not move]
-
-        # Separate checked vs unchecked commercial candidates
-        checked_commercial = split_candidates_commercial.iloc[move_to_corp_idx].copy() if move_to_corp_idx else pd.DataFrame()
-        unchecked_commercial = split_candidates_commercial.iloc[stay_in_indi_idx].copy() if stay_in_indi_idx else pd.DataFrame()
-
-        # For consumer candidates: checked = move to indi, unchecked = stay in corpo
-        move_to_indi_idx = [i for i, move in enumerate(consumer_moves) if move]
-        stay_in_corp_idx = [i for i, move in enumerate(consumer_moves) if not move]
-
-        # Separate checked vs unchecked consumer candidates
-        checked_consumer = split_candidates_consumer.iloc[move_to_indi_idx].copy() if move_to_indi_idx else pd.DataFrame()
-        unchecked_consumer = split_candidates_consumer.iloc[stay_in_corp_idx].copy() if stay_in_corp_idx else pd.DataFrame()
-
-        # Return unchecked records to original DataFrames (no processing)
-        if not unchecked_commercial.empty:
-            # Restore original individual name structure for unchecked commercial candidates
-            if 'ORIGINAL_BUSINESSNAME' in unchecked_commercial.columns:
-                # Split the original business name back into individual components
-                for idx, row in unchecked_commercial.iterrows():
-                    if pd.notna(row['ORIGINAL_BUSINESSNAME']):
-                        # Apply remove_titles function before splitting to clean titles
-                        cleaned_business_name = remove_titles(str(row['ORIGINAL_BUSINESSNAME']))
-                        name_parts = cleaned_business_name.split(maxsplit=2)
-                        unchecked_commercial.at[idx, 'SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
-                        unchecked_commercial.at[idx, 'FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
-                        unchecked_commercial.at[idx, 'MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
-                # Remove the temporary ORIGINAL_BUSINESSNAME column
-                unchecked_commercial = unchecked_commercial.drop(columns=['ORIGINAL_BUSINESSNAME'], errors='ignore')
-            indi = pd.concat([indi, unchecked_commercial], ignore_index=True)
-        
-        if not unchecked_consumer.empty:
-            # Restore original business name and clean up individual columns for unchecked consumer records
-            if 'ORIGINAL_BUSINESSNAME' in unchecked_consumer.columns:
-                unchecked_consumer['BUSINESSNAME'] = unchecked_consumer['ORIGINAL_BUSINESSNAME']
-                columns_to_drop = ['ORIGINAL_BUSINESSNAME', 'SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
-                unchecked_consumer = unchecked_consumer.drop(columns=[col for col in columns_to_drop if col in unchecked_consumer.columns], errors='ignore')
-            corpo = pd.concat([corpo, unchecked_consumer], ignore_index=True)
-
-        # Transform ONLY checked records
-        confirmed_commercial = pd.DataFrame()
-        confirmed_consumer = pd.DataFrame()
-        
-        if not checked_commercial.empty:
-            # Transform individual records to commercial format
-            confirmed_commercial = transform_to_commercial(checked_commercial)
+            required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer', 'indi', 'corpo']
+            missing_keys = [key for key in required_session_keys if key not in request.session]
             
-        if not checked_consumer.empty:
-            # Transform commercial records to consumer format
-            confirmed_consumer = transform_to_consumer(checked_consumer)
+            if missing_keys:
+                messages.error(request, f'Session data missing: {missing_keys}. Please restart the process.')
+                return redirect('upload_file')
             
-        # Concatenate only the transformed checked records
-        if not confirmed_consumer.empty:
-            indi = pd.concat([indi, confirmed_consumer], ignore_index=True)
-        if not confirmed_commercial.empty:
-            corpo = pd.concat([corpo, confirmed_commercial], ignore_index=True)
+            # Get user checkbox moves from POST (lists of booleans)
+            commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
+            consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
+            
+            # Retrieve stored data from session
+            split_candidates_commercial = pd.read_json(request.session['split_candidates_commercial'], orient='split', dtype=str)
+            split_candidates_commercial = enforce_string_columns(split_candidates_commercial)
+            split_candidates_consumer = pd.read_json(request.session['split_candidates_consumer'], orient='split', dtype=str)
+            split_candidates_consumer = enforce_string_columns(split_candidates_consumer)
+            indi = pd.read_json(request.session['indi'], orient='split', dtype=str)
+            indi = enforce_string_columns(indi)
+            corpo = pd.read_json(request.session['corpo'], orient='split', dtype=str)
+            corpo = enforce_string_columns(corpo)
+            processing_stats = request.session.get('processing_stats', [])
+            original_filename = request.session.get('original_filename', 'output')
+            subscriber_alias = request.session.get('subscriber_alias', original_filename)
+            
+            # Extract date from filename for standardized naming
+            extracted_month, extracted_year = extract_date_from_filename(original_filename)
+
+            # For commercial candidates: checked = move to corpo, unchecked = stay in indi
+            move_to_corp_idx = [i for i, move in enumerate(commercial_moves) if move]
+            stay_in_indi_idx = [i for i, move in enumerate(commercial_moves) if not move]
+
+            # Separate checked vs unchecked commercial candidates
+            checked_commercial = split_candidates_commercial.iloc[move_to_corp_idx].copy() if move_to_corp_idx else pd.DataFrame()
+            unchecked_commercial = split_candidates_commercial.iloc[stay_in_indi_idx].copy() if stay_in_indi_idx else pd.DataFrame()
+
+            # For consumer candidates: checked = move to indi, unchecked = stay in corpo
+            move_to_indi_idx = [i for i, move in enumerate(consumer_moves) if move]
+            stay_in_corp_idx = [i for i, move in enumerate(consumer_moves) if not move]
+
+            # Separate checked vs unchecked consumer candidates
+            checked_consumer = split_candidates_consumer.iloc[move_to_indi_idx].copy() if move_to_indi_idx else pd.DataFrame()
+            unchecked_consumer = split_candidates_consumer.iloc[stay_in_corp_idx].copy() if stay_in_corp_idx else pd.DataFrame()
+
+            # Return unchecked records to original DataFrames (no processing)
+            if not unchecked_commercial.empty:
+                # Restore original individual name structure for unchecked commercial candidates
+                if 'ORIGINAL_BUSINESSNAME' in unchecked_commercial.columns:
+                    # Split the original business name back into individual components
+                    for idx, row in unchecked_commercial.iterrows():
+                        if pd.notna(row['ORIGINAL_BUSINESSNAME']):
+                            # Apply remove_titles function before splitting to clean titles
+                            cleaned_business_name = remove_titles(str(row['ORIGINAL_BUSINESSNAME']))
+                            name_parts = cleaned_business_name.split(maxsplit=2)
+                            unchecked_commercial.at[idx, 'SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
+                            unchecked_commercial.at[idx, 'FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
+                            unchecked_commercial.at[idx, 'MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
+                    # Remove the temporary ORIGINAL_BUSINESSNAME column
+                    unchecked_commercial = unchecked_commercial.drop(columns=['ORIGINAL_BUSINESSNAME'], errors='ignore')
+                indi = pd.concat([indi, unchecked_commercial], ignore_index=True)
+            
+            if not unchecked_consumer.empty:
+                # Restore original business name and clean up individual columns for unchecked consumer records
+                if 'ORIGINAL_BUSINESSNAME' in unchecked_consumer.columns:
+                    unchecked_consumer['BUSINESSNAME'] = unchecked_consumer['ORIGINAL_BUSINESSNAME']
+                    columns_to_drop = ['ORIGINAL_BUSINESSNAME', 'SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+                    unchecked_consumer = unchecked_consumer.drop(columns=[col for col in columns_to_drop if col in unchecked_consumer.columns], errors='ignore')
+                corpo = pd.concat([corpo, unchecked_consumer], ignore_index=True)
+
+            # Transform ONLY checked records
+            confirmed_commercial = pd.DataFrame()
+            confirmed_consumer = pd.DataFrame()
+            
+            if not checked_commercial.empty:
+                # Transform individual records to commercial format
+                confirmed_commercial = transform_to_commercial(checked_commercial)
+                
+            if not checked_consumer.empty:
+                # Transform commercial records to consumer format
+                confirmed_consumer = transform_to_consumer(checked_consumer)
+                
+            # Concatenate only the transformed checked records
+            if not confirmed_consumer.empty:
+                indi = pd.concat([indi, confirmed_consumer], ignore_index=True)
+            if not confirmed_commercial.empty:
+                corpo = pd.concat([corpo, confirmed_commercial], ignore_index=True)
 
 
-        # All further processing should NOT change dtypes, but just in case:
-        indi = modify_middle_names(indi)
-        corpo = modify_middle_names(corpo)
+            # All further processing should NOT change dtypes, but just in case:
+            indi = modify_middle_names(indi)
+            corpo = modify_middle_names(corpo)
 
 
 
 
 
-        indi = clean_for_output(indi)
-        corpo = clean_for_output(corpo)
-        # Drop name and dependant columns from corpo again to be sure
-        columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
-        corpo = corpo.drop(columns=[col for col in columns_to_remove if col in corpo.columns], errors='ignore')
+            indi = clean_for_output(indi)
+            corpo = clean_for_output(corpo)
+            # Drop name and dependant columns from corpo again to be sure
+            columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
+            corpo = corpo.drop(columns=[col for col in columns_to_remove if col in corpo.columns], errors='ignore')
 
-        total_individual_records = len(indi) if not indi.empty else 0
-        total_corporate_records = len(corpo) if not corpo.empty else 0
+            total_individual_records = len(indi) if not indi.empty else 0
+            total_corporate_records = len(corpo) if not corpo.empty else 0
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Generate standardized filenames using new naming convention
+            indi_output_filename = generate_filename(subscriber_alias, 'excel', 'consumer', extracted_month, extracted_year)
+            corpo_output_filename = generate_filename(subscriber_alias, 'excel', 'commercial', extracted_month, extracted_year)
+            
+            # Use fallback naming if subscriber mapping fails
+            if not indi_output_filename:
+                indi_output_filename = generate_fallback_filename(original_filename, 'excel', 'consumer', timestamp)
+            if not corpo_output_filename:
+                corpo_output_filename = generate_fallback_filename(original_filename, 'excel', 'commercial', timestamp)
+            
+            # For full processed file, use original naming for now (can be updated later if needed)
+            full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
+            excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
+            excel_individual_dir = os.path.join(excel_dir, 'individual')
+            excel_corporate_dir = os.path.join(excel_dir, 'corporate')
+            excel_full_dir = os.path.join(excel_dir, 'full')
+            os.makedirs(excel_individual_dir, exist_ok=True)
+            os.makedirs(excel_corporate_dir, exist_ok=True)
+            os.makedirs(excel_full_dir, exist_ok=True)
+
+            fs = FileSystemStorage()
+            
+
+            indi_excel_path = os.path.join(excel_individual_dir, indi_output_filename)
+            indi.to_excel(indi_excel_path, index=False)
+            indi_processed_file_url = fs.url(os.path.join('excel', 'individual', indi_output_filename))
+            corpo_excel_path = os.path.join(excel_corporate_dir, corpo_output_filename)
+            corpo.to_excel(corpo_excel_path, index=False)
+            corpo_processed_file_url = fs.url(os.path.join('excel', 'corporate', corpo_output_filename))
+            full_excel_path = os.path.join(excel_full_dir, full_output_filename)
+            with pd.ExcelWriter(full_excel_path, engine='openpyxl') as writer:
+                indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
+                corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
+            full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
+            # TXT versions - Generate standardized filenames using new naming convention
+            indi_txt_filename = generate_filename(subscriber_alias, 'txt', 'consumer', extracted_month, extracted_year)
+            corpo_txt_filename = generate_filename(subscriber_alias, 'txt', 'commercial', extracted_month, extracted_year)
+            
+            # Use fallback naming if subscriber mapping fails
+            if not indi_txt_filename:
+                indi_txt_filename = generate_fallback_filename(original_filename, 'txt', 'consumer', timestamp)
+            if not corpo_txt_filename:
+                corpo_txt_filename = generate_fallback_filename(original_filename, 'txt', 'commercial', timestamp)
+            
+            # For full processed file, use original naming for now (can be updated later if needed)
+            full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
+            txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
+            os.makedirs(txt_dir, exist_ok=True)
+            txt_individual_dir = os.path.join(txt_dir, 'individual')
+            txt_corporate_dir = os.path.join(txt_dir, 'corporate')
+            txt_full_dir = os.path.join(txt_dir, 'full')
+            os.makedirs(txt_individual_dir, exist_ok=True)
+            os.makedirs(txt_corporate_dir, exist_ok=True)
+            os.makedirs(txt_full_dir, exist_ok=True)
+            indi_txt_path = os.path.join(txt_individual_dir, indi_txt_filename)
+            indi.to_csv(indi_txt_path, sep='\t', index=False, encoding='utf-8')
+            corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
+            corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
+            full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
+            with open(full_txt_path, 'w', encoding='utf-8') as f:
+                indi.to_csv(f, sep='\t', index=False)
+                f.write("\n\n")
+                corpo.to_csv(f, sep='\t', index=False)
+            indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
+            corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
+            full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
+            
+            return render(request, 'upload.html', {
+                'form': ExcelUploadForm(),
+                'success_message': 'File processed and merged successfully!',
+                'processing_stats': processing_stats,
+                'total_individual': total_individual_records,
+                'total_corporate': total_corporate_records,
+                'individual_download_url': indi_processed_file_url,
+                'corporate_download_url': corpo_processed_file_url,
+                'full_download_url': full_processed_file_url,
+                'individual_txt_url': indi_txt_url,
+                'corporate_txt_url': corpo_txt_url,
+                'full_txt_url': full_txt_url
+            })
+        except Exception as e:
+            # This 'except' block will catch any bug or error
+        # Log the full error for your own debugging
+            print("An error occurred in verify_split_decision:")
+            print(traceback.format_exc())
         
-        # Generate standardized filenames using new naming convention
-        indi_output_filename = generate_filename(subscriber_alias, 'excel', 'consumer', extracted_month, extracted_year)
-        corpo_output_filename = generate_filename(subscriber_alias, 'excel', 'commercial', extracted_month, extracted_year)
-        
-        # Use fallback naming if subscriber mapping fails
-        if not indi_output_filename:
-            indi_output_filename = generate_fallback_filename(original_filename, 'excel', 'consumer', timestamp)
-        if not corpo_output_filename:
-            corpo_output_filename = generate_fallback_filename(original_filename, 'excel', 'commercial', timestamp)
-        
-        # For full processed file, use original naming for now (can be updated later if needed)
-        full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
-        excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
-        excel_individual_dir = os.path.join(excel_dir, 'individual')
-        excel_corporate_dir = os.path.join(excel_dir, 'corporate')
-        excel_full_dir = os.path.join(excel_dir, 'full')
-        os.makedirs(excel_individual_dir, exist_ok=True)
-        os.makedirs(excel_corporate_dir, exist_ok=True)
-        os.makedirs(excel_full_dir, exist_ok=True)
-
-        fs = FileSystemStorage()
-        
-
-        indi_excel_path = os.path.join(excel_individual_dir, indi_output_filename)
-        indi.to_excel(indi_excel_path, index=False)
-        indi_processed_file_url = fs.url(os.path.join('excel', 'individual', indi_output_filename))
-        corpo_excel_path = os.path.join(excel_corporate_dir, corpo_output_filename)
-        corpo.to_excel(corpo_excel_path, index=False)
-        corpo_processed_file_url = fs.url(os.path.join('excel', 'corporate', corpo_output_filename))
-        full_excel_path = os.path.join(excel_full_dir, full_output_filename)
-        with pd.ExcelWriter(full_excel_path, engine='openpyxl') as writer:
-            indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
-            corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
-        full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
-        # TXT versions - Generate standardized filenames using new naming convention
-        indi_txt_filename = generate_filename(subscriber_alias, 'txt', 'consumer', extracted_month, extracted_year)
-        corpo_txt_filename = generate_filename(subscriber_alias, 'txt', 'commercial', extracted_month, extracted_year)
-        
-        # Use fallback naming if subscriber mapping fails
-        if not indi_txt_filename:
-            indi_txt_filename = generate_fallback_filename(original_filename, 'txt', 'consumer', timestamp)
-        if not corpo_txt_filename:
-            corpo_txt_filename = generate_fallback_filename(original_filename, 'txt', 'commercial', timestamp)
-        
-        # For full processed file, use original naming for now (can be updated later if needed)
-        full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
-        txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
-        os.makedirs(txt_dir, exist_ok=True)
-        txt_individual_dir = os.path.join(txt_dir, 'individual')
-        txt_corporate_dir = os.path.join(txt_dir, 'corporate')
-        txt_full_dir = os.path.join(txt_dir, 'full')
-        os.makedirs(txt_individual_dir, exist_ok=True)
-        os.makedirs(txt_corporate_dir, exist_ok=True)
-        os.makedirs(txt_full_dir, exist_ok=True)
-        indi_txt_path = os.path.join(txt_individual_dir, indi_txt_filename)
-        indi.to_csv(indi_txt_path, sep='\t', index=False, encoding='utf-8')
-        corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
-        corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
-        full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
-        with open(full_txt_path, 'w', encoding='utf-8') as f:
-            indi.to_csv(f, sep='\t', index=False)
-            f.write("\n\n")
-            corpo.to_csv(f, sep='\t', index=False)
-        indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
-        corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
-        full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
-        return render(request, 'upload.html', {
-            'form': ExcelUploadForm(),
-            'success_message': 'File processed and merged successfully!',
-            'processing_stats': processing_stats,
-            'total_individual': total_individual_records,
-            'total_corporate': total_corporate_records,
-            'individual_download_url': indi_processed_file_url,
-            'corporate_download_url': corpo_processed_file_url,
-            'full_download_url': full_processed_file_url,
-            'individual_txt_url': indi_txt_url,
-            'corporate_txt_url': corpo_txt_url,
-            'full_txt_url': full_txt_url
-        })
+        # Return a JSON response with a 500 status code
+        return JsonResponse({'error': 'An internal server error occurred. Please contact support.'}, status=500)
     else:
         return render(request, 'upload.html', {'form': ExcelUploadForm(), 'error_message': 'Invalid request.'})
 

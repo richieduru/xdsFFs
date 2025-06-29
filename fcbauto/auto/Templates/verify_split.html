@@ -228,7 +228,7 @@ function updateSelectedCount() {
     var count = $('tbody input[type="checkbox"]:checked').length;
     $('#selected-count').text(count);
 }
-
+// {% comment %} take note of this function  {% endcomment %}
 function submitVerificationForm() {
     $('#spinner-overlay').show();
 
@@ -249,14 +249,27 @@ function submitVerificationForm() {
     var csrf_token = form.find('input[name="csrfmiddlewaretoken"]').val();
     var post_url = form.attr("action");
 
-    $.post(post_url, {
-        'commercial_moves': JSON.stringify(commercial),
-        'consumer_moves': JSON.stringify(consumer),
-        'csrfmiddlewaretoken': csrf_token
-    }, function(data) {
-        document.open();
-        document.write(data);
-        document.close();
+    $.ajax({
+        url: post_url,
+        type: 'POST',
+        data: {
+            'commercial_moves': JSON.stringify(commercial),
+            'consumer_moves': JSON.stringify(consumer),
+            'csrfmiddlewaretoken': csrf_token
+        },
+        success: function(data) {
+            // This part handles the successful response
+            document.open();
+            document.write(data);
+            document.close();
+        },
+        error: function(jqXHR, textStatus, errorThrown) {
+            // This new part handles any server errors
+            $('#spinner-overlay').hide(); // Hide the spinner
+            alert('An error occurred during verification. Please check the console for details and try again.');
+            console.error("Error:", textStatus, errorThrown);
+            console.error("Response:", jqXHR.responseText);
+        }
     });
 }
 
