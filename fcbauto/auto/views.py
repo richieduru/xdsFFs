@@ -3269,10 +3269,10 @@ def verify_split_decision(request):
             corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
             corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
             full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
-            with open(full_txt_path, 'w', encoding='utf-8') as f:
-                indi.to_csv(f, sep='\t', index=False)
+            with open(full_txt_path, 'w', encoding='utf-8', newline='\n') as f:
+                indi.to_csv(f, sep='\t', index=False, lineterminator='\n')
                 f.write("\n\n")
-                corpo.to_csv(f, sep='\t', index=False)
+                corpo.to_csv(f, sep='\t', index=False, lineterminator='\n')
             indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
             corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
             full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
