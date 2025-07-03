@@ -248,7 +248,7 @@
 {% block content %}
 <div class="content-wrapper">
     <div class="tabs">
-        <a href="{% url 'auto:upload' %}" class="tab-link {% if success_message %}inactive{% endif %}"><i class="fas fa-upload"></i> Upload File</a>
+        <a href="{% url 'auto:upload' %}" class="tab-link {% if success_message %}inactive{% endif %}"><i class="fas fa-upload"></i> Clean File</a>
         <a href="#" class="tab-link {% if not success_message %}inactive{% endif %}"><i class="fas fa-poll"></i> View Results</a>
     </div>
 
@@ -281,7 +281,7 @@
 
             <button type="submit" class="btn btn-upload-file" id="uploadButton">
                 <span class="button-content">
-                    <i class="fas fa-upload me-2"></i>Upload File
+                    <i class="fas fa-upload me-2"></i>Clean File
                 </span>
                 <span class="spinner-border" role="status">
                     <span class="visually-hidden">Loading...</span>

@@ -10,7 +10,7 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from .forms import ExcelUploadForm
-from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,CommToConsu, commercial_keywords,consumer_merged_mapping,commercial_merged_mapping
+from .map import consu_mapping, comm_mapping, guar_mapping, credit_mapping, prin_mapping,Gender_dict,Country_dict,state_dict,Marital_dict,Borrower_dict,Employer_dict,Title_dict,Occu_dict,AccountStatus_dict,Loan_dict,Repayment_dict,Currency_dict,Classification_dict,Collateraltype_dict,Positioninbusiness_dict,ConsuToComm,CommToConsu, commercial_keywords,consumer_merged_mapping,commercial_merged_mapping,guarantor_columns_to_clear,principal_officer_columns_to_clear
 from .filename_utils import generate_filename, generate_fallback_filename
 from rapidfuzz import fuzz, process
 from typing import Union, Optional
@@ -221,8 +221,6 @@ def preprocess_tenor_from_headers(df):
     
     # --- UPDATED: Comprehensive dictionary for all units ---
     header_unit_multipliers = {
-        # Days
-        'days': 1, 'day': 1, 'd': 1, 'dys': 1,
         # Weeks
         'weeks': 7, 'week': 7, 'w': 7,
         # Months
@@ -3046,10 +3044,60 @@ def reorder_consumer_columns(columns):
     # Return original order if we couldn't reorder
     return columns
 
-def transform_to_commercial(df):
+# def transform_to_commercial(df):
+#     """
+#     Transform individual records to commercial format.
+#     Only processes checked records that need to be moved to corporate.
+#     """
+#     if df.empty:
+#         return df
+    
+#     df_copy = df.copy()
+    
+#     # Use ORIGINAL_BUSINESSNAME if available, otherwise reconstruct from components
+#     if 'BUSINESSNAME' not in df_copy.columns:
+#         if 'ORIGINAL_BUSINESSNAME' in df_copy.columns:
+#             # Use the stored original business name to prevent duplication
+#             df_copy['BUSINESSNAME'] = df_copy['ORIGINAL_BUSINESSNAME']
+#         else:
+#             # Fallback: reconstruct from individual components if no original name exists
+#             df_copy['BUSINESSNAME'] = (
+#                 df_copy['SURNAME'].fillna('') + ' '
+#                 + df_copy['FIRSTNAME'].fillna('') + ' '
+#                 + df_copy['MIDDLENAME'].fillna('')
+#             ).str.strip()
+    
+#     # Drop individual name, dependant, and temporary columns for corporate format
+#     columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS', 'ORIGINAL_BUSINESSNAME']
+#     df_copy = df_copy.drop(columns=[col for col in columns_to_remove if col in df_copy.columns], errors='ignore')
+    
+#     # Apply column mapping from consumer to commercial
+#     df_copy = rename_columns(df_copy, ConsuToComm.copy())
+#     df_copy = enforce_string_columns(df_copy)
+    
+#     return df_copy
+
+
+# def transform_to_consumer(df):
+#     """
+#     Transform commercial records to consumer format.
+#     Only processes checked records that need to be moved to individual.
+#     """
+#     if df.empty:
+#         return df
+    
+#     df_copy = df.copy()
+    
+#     # Apply column mapping from commercial to consumer
+#     df_copy = rename_columns(df_copy, CommToConsu.copy())
+#     df_copy = enforce_string_columns(df_copy)
+    
+#     return df_copy
+
+
+def transform_to_commercial(df, columns_to_clear):
     """
-    Transform individual records to commercial format.
-    Only processes checked records that need to be moved to corporate.
+    Transform individual records to commercial format and clear guarantor data.
     """
     if df.empty:
         return df
@@ -3059,42 +3107,51 @@ def transform_to_commercial(df):
     # Use ORIGINAL_BUSINESSNAME if available, otherwise reconstruct from components
     if 'BUSINESSNAME' not in df_copy.columns:
         if 'ORIGINAL_BUSINESSNAME' in df_copy.columns:
-            # Use the stored original business name to prevent duplication
             df_copy['BUSINESSNAME'] = df_copy['ORIGINAL_BUSINESSNAME']
         else:
-            # Fallback: reconstruct from individual components if no original name exists
             df_copy['BUSINESSNAME'] = (
                 df_copy['SURNAME'].fillna('') + ' '
                 + df_copy['FIRSTNAME'].fillna('') + ' '
                 + df_copy['MIDDLENAME'].fillna('')
             ).str.strip()
-    
+            
+    # --- Clear data from the specified guarantor columns ---
+    for col in columns_to_clear:
+        if col in df_copy.columns:
+            df_copy[col] = ''
+    # ---
+
     # Drop individual name, dependant, and temporary columns for corporate format
     columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS', 'ORIGINAL_BUSINESSNAME']
     df_copy = df_copy.drop(columns=[col for col in columns_to_remove if col in df_copy.columns], errors='ignore')
     
-    # Apply column mapping from consumer to commercial
     df_copy = rename_columns(df_copy, ConsuToComm.copy())
     df_copy = enforce_string_columns(df_copy)
     
     return df_copy
 
 
-def transform_to_consumer(df):
+def transform_to_consumer(df, columns_to_clear):
     """
-    Transform commercial records to consumer format.
-    Only processes checked records that need to be moved to individual.
+    Transform commercial records to consumer format and clear Principal Officer data.
     """
     if df.empty:
         return df
     
     df_copy = df.copy()
-    
+
+    # --- Clear data from the specified Principal Officer columns ---
+    for col in columns_to_clear:
+        if col in df_copy.columns:
+            df_copy[col] = ''
+    # ---
+
     # Apply column mapping from commercial to consumer
     df_copy = rename_columns(df_copy, CommToConsu.copy())
     df_copy = enforce_string_columns(df_copy)
     
     return df_copy
+# 
 
 
 
@@ -3172,17 +3229,35 @@ def verify_split_decision(request):
                     unchecked_consumer = unchecked_consumer.drop(columns=[col for col in columns_to_drop if col in unchecked_consumer.columns], errors='ignore')
                 corpo = pd.concat([corpo, unchecked_consumer], ignore_index=True)
 
-            # Transform ONLY checked records
+
+            # When moving an individual to commercial:
+            confirmed_commercial = transform_to_commercial(
+                checked_commercial, 
+                columns_to_clear=guarantor_columns_to_clear
+            )
+
+            # When moving a corporate to consumer:
+            confirmed_consumer = transform_to_consumer(
+                checked_consumer, 
+                columns_to_clear=principal_officer_columns_to_clear
+            )
+# Transform ONLY checked records
             confirmed_commercial = pd.DataFrame()
             confirmed_consumer = pd.DataFrame()
             
             if not checked_commercial.empty:
-                # Transform individual records to commercial format
-                confirmed_commercial = transform_to_commercial(checked_commercial)
+                # When moving an individual to commercial:
+                confirmed_commercial = transform_to_commercial(
+                    checked_commercial, 
+                    columns_to_clear=guarantor_columns_to_clear
+                )
                 
             if not checked_consumer.empty:
-                # Transform commercial records to consumer format
-                confirmed_consumer = transform_to_consumer(checked_consumer)
+                # When moving a corporate to consumer:
+                confirmed_consumer = transform_to_consumer(
+                    checked_consumer, 
+                    columns_to_clear=principal_officer_columns_to_clear
+                )
                 
             # Concatenate only the transformed checked records
             if not confirmed_consumer.empty:
@@ -3190,14 +3265,9 @@ def verify_split_decision(request):
             if not confirmed_commercial.empty:
                 corpo = pd.concat([corpo, confirmed_commercial], ignore_index=True)
 
-
             # All further processing should NOT change dtypes, but just in case:
             indi = modify_middle_names(indi)
             corpo = modify_middle_names(corpo)
-
-
-
-
 
             indi = clean_for_output(indi)
             corpo = clean_for_output(corpo)
