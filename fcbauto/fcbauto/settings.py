@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_q',
     'auto',
     'acctmgt',
 ]
@@ -148,4 +149,19 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'acctmgt:login'  # Using the namespaced URL
 LOGIN_REDIRECT_URL = 'auto:upload'  # Using the namespaced URL for upload
 LOGOUT_REDIRECT_URL = 'acctmgt:login'  # Using the namespaced URL
+
+# Django-Q Configuration
+Q_CLUSTER = {
+    'name': 'fcbauto',
+    'workers': 3,
+    'recycle': 500,
+    'timeout': 86400,  # 1 hour timeout for large file processing
+    'retry': 86460,  # Retry after timeout + 60 seconds
+    'compress': True,
+    'save_limit': 250,
+    'queue_limit': 50,
+    'cpu_affinity': 1,
+    'label': 'Django Q',
+    'orm': 'default'  # Use database broker instead of Redis
+}
 

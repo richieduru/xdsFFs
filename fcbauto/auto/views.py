@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from .forms import ExcelUploadForm
@@ -20,6 +20,8 @@ import traceback
 from django.views.decorators.csrf import csrf_exempt
 import json
 from django.http import JsonResponse
+from django_q.tasks import async_task
+from .models import FileProcessingTask
 
 
 
@@ -2827,6 +2829,62 @@ def convert_numpy(obj):
     return obj
 
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
+from django.db.models import Q
+
+@login_required
+def task_dashboard(request):
+    """
+    Display a dashboard of all user tasks with filtering and pagination
+    """
+    # Get filter parameters
+    status_filter = request.GET.get('status', '')
+    search_query = request.GET.get('search', '')
+    
+    # Start with user's tasks
+    tasks = FileProcessingTask.objects.filter(user=request.user)
+    
+    # Apply status filter
+    if status_filter:
+        tasks = tasks.filter(status=status_filter)
+    
+    # Apply search filter (filename or subscriber alias)
+    if search_query:
+        tasks = tasks.filter(
+            Q(filename__icontains=search_query) | 
+            Q(subscriber_alias__icontains=search_query)
+        )
+    
+    # Order by most recent first
+    tasks = tasks.order_by('-created_at')
+    
+    # Pagination
+    paginator = Paginator(tasks, 10)  # Show 10 tasks per page
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    # Get status choices for filter dropdown
+    status_choices = FileProcessingTask.STATUS_CHOICES
+    
+    # Count tasks by status for dashboard stats
+    task_stats = {
+        'total': FileProcessingTask.objects.filter(user=request.user).count(),
+        'pending': FileProcessingTask.objects.filter(user=request.user, status='pending').count(),
+        'processing': FileProcessingTask.objects.filter(user=request.user, status='processing').count(),
+        'awaiting_verification': FileProcessingTask.objects.filter(user=request.user, status='awaiting_verification').count(),
+        'completed': FileProcessingTask.objects.filter(user=request.user, status='completed').count(),
+        'failed': FileProcessingTask.objects.filter(user=request.user, status='failed').count(),
+    }
+    
+    context = {
+        'page_obj': page_obj,
+        'status_choices': status_choices,
+        'current_status_filter': status_filter,
+        'current_search': search_query,
+        'task_stats': task_stats,
+    }
+    
+    return render(request, 'auto/task_dashboard.html', context)
 
 @login_required
 def upload_file(request):
@@ -2839,164 +2897,155 @@ def upload_file(request):
             # Extract subscriber alias from filename by removing date patterns
             subscriber_alias = extract_subscriber_alias_from_filename(original_filename)
             
+            # Save the uploaded file
             fs = FileSystemStorage()
             filename = fs.save(uploaded_file.name, uploaded_file)
             file_path = os.path.join(settings.MEDIA_ROOT, filename)
+            
             try:
-                xds = pd.read_excel(file_path, sheet_name=None, na_filter=False, dtype=object)
-                processing_stats = []
-                for sheet_name, df in xds.items():
-                    initial_records = len(df)
-                    processing_stats.append({
-                        'sheet_name': sheet_name,
-                        'initial_columns': len(df.columns),
-                        'initial_records': initial_records,
-                        'processed_columns': None,
-                        'valid_records': 0
-                    })
-                    for col in df.columns:
-                        df[col] = df[col].astype(str)
-                        df[col] = df[col].replace({'nan': '', 'None': '', 'NaN': ''})
-                    xds[sheet_name] = df
-                processed_sheets = ensure_all_sheets_exist(xds)
-                for sheet_name, sheet_data in xds.items():
-                    print(f"\n[DEBUG] Original headers in uploaded file for sheet '{sheet_name}': {list(sheet_data.columns)}")
-                    cleaned_name = clean_sheet_name(sheet_name)
-                    cleaned_df = sheet_data.copy()
-                    cleaned_df.replace(['N/A', 'N.A', 'None', "NaN", "null", "n/a", "#N/A",'NIL','Nill','NA'], '', inplace=True)
-                    print(f"[DEBUG] Headers after pandas loads the file: {list(cleaned_df.columns)}")
-                    cleaned_df.columns = [str(col).upper().strip() for col in cleaned_df.columns]
-                    cleaned_df = preprocess_tenor_from_headers(cleaned_df)
-                    cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
-                    cleaned_df = make_column_names_unique(cleaned_df)
-                    cleaned_df.columns = [remove_special_characters(col) for col in cleaned_df.columns]
-                    print(f"[DEBUG] Headers after cleaning and making them: {list(cleaned_df.columns)}")
-                    if cleaned_name == 'individualborrowertemplate':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consu_mapping)
-                    elif cleaned_name == 'corporateborrowertemplate':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, comm_mapping)
-                    elif cleaned_name == 'principalofficerstemplate':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, prin_mapping)
-                    elif cleaned_name == 'creditinformation':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, credit_mapping)
-                    elif cleaned_name == 'guarantorsinformation':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, guar_mapping)
-                    elif cleaned_name == 'consumermerged':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, consumer_merged_mapping)
-                    elif cleaned_name == 'commercialmerged':
-                        cleaned_df = rename_columns_with_fuzzy_rapidfuzz(cleaned_df, commercial_merged_mapping)
-                    for stat in processing_stats:
-                        if stat['sheet_name'] == sheet_name:
-                            if cleaned_name == 'individualborrowertemplate' and 'CUSTOMERID' in cleaned_df.columns:
-                                stat['valid_records'] = cleaned_df['CUSTOMERID'].astype(str).ne('').sum()
-                            elif cleaned_name == 'corporateborrowertemplate' and 'CUSTOMERID' in cleaned_df.columns:
-                                stat['valid_records'] = cleaned_df['CUSTOMERID'].astype(str).ne('').sum()
-                            elif cleaned_name == 'creditinformation' and 'CUSTOMERID' in cleaned_df.columns:
-                                stat['valid_records'] = cleaned_df['CUSTOMERID'].astype(str).ne('').sum()
-                            elif cleaned_name == 'principalofficerstemplate' and 'CUSTOMERID' in cleaned_df.columns:
-                                stat['valid_records'] = cleaned_df['CUSTOMERID'].astype(str).ne('').sum()
-                            elif cleaned_name == 'guarantorsinformation' and 'CUSTOMERSACCOUNTNUMBER' in cleaned_df.columns:
-                                stat['valid_records'] = cleaned_df['CUSTOMERSACCOUNTNUMBER'].astype(str).ne('').sum()
-                            break
-                    cleaned_df = process_dates(cleaned_df)
-                    cleaned_df = process_names(cleaned_df)
-                    cleaned_df = process_special_characters(cleaned_df)
-                    cleaned_df = replace_ampersands(cleaned_df)
-                    cleaned_df = process_nationality(cleaned_df)
-                    cleaned_df = process_gender(cleaned_df)
-                    cleaned_df = process_states(cleaned_df)
-                    cleaned_df = process_marital_status(cleaned_df)
-                    cleaned_df = process_borrower_type(cleaned_df)
-                    cleaned_df = process_employment_status(cleaned_df)
-                    cleaned_df = process_phone_columns(cleaned_df)
-                    cleaned_df = process_title(cleaned_df)
-                    cleaned_df = process_account_status(cleaned_df)
-                    cleaned_df = process_loan_type(cleaned_df)
-                    cleaned_df = process_currency(cleaned_df)
-                    cleaned_df = process_repayment(cleaned_df)
-                    cleaned_df = process_classification(cleaned_df)
-                    cleaned_df = process_collateral_type(cleaned_df)
-                    cleaned_df = process_loan_tenor(cleaned_df)
-                    cleaned_df = clear_previous_info_columns(cleaned_df)
-                    cleaned_df = process_numeric_columns(cleaned_df)
-                    cleaned_df = fill_data_column(cleaned_df)
-                    cleaned_df = fill_depend_column(cleaned_df)
-                    cleaned_df = process_identity_numbers(cleaned_df)
-                    cleaned_df = process_passport_number(cleaned_df)
-                    cleaned_df = process_business_id(cleaned_df)
-                    cleaned_df = process_bvn_number(cleaned_df)
-                    cleaned_df = process_occu(cleaned_df)
-                    cleaned_df = process_DriversLicense(cleaned_df)
-                    cleaned_df = process_otherid(cleaned_df)
-                    cleaned_df = process_tax_numbers(cleaned_df)
-                    cleaned_df = process_collateral_details(cleaned_df)
-                    cleaned_df = positioninBusiness(cleaned_df)
-                    cleaned_df = trim_strings_to_59(cleaned_df)
-                    cleaned_df = remove_duplicates(cleaned_df)
-
-                    for stat in processing_stats:
-                        if stat['sheet_name'] == sheet_name:
-                            stat['processed_columns'] = len(cleaned_df.columns)
-                            break
-                    processed_sheets[cleaned_name] = cleaned_df
-
-                # --- Human-in-the-loop: Extract split candidates ---
-                # Use the same logic as merge_dataframes, but pause after split candidates are identified
-                # FIX: Use merged sheets directly if present
-                if 'consumermerged' in processed_sheets or 'commercialmerged' in processed_sheets:
-                    indi = processed_sheets.get('consumermerged', pd.DataFrame())
-                    corpo = processed_sheets.get('commercialmerged', pd.DataFrame())
-                else:
-                    consu = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
-                    comm = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
-                    credit = processed_sheets.get('creditinformation', pd.DataFrame())
-                    guar = processed_sheets.get('guarantorsinformation', pd.DataFrame())
-                    prin = processed_sheets.get('principalofficerstemplate', pd.DataFrame())
-                    indi = merge_individual_borrowers(consu, credit, guar)
-                    corpo = merge_corporate_borrowers(comm, credit, prin)
-
-                # Split commercial entities from individual borrowers (candidates for manual review)
-                split_indi, split_candidates_commercial = split_commercial_entities(indi)
-                # Split consumer entities from corporate borrowers (candidates for manual review)
-                split_corpo, split_candidates_consumer = split_consumer_entities(corpo)
-                # Store all data in session for next step
-                request.session['split_candidates_commercial'] = split_candidates_commercial.to_json(orient='split')
-                request.session['split_candidates_consumer'] = split_candidates_consumer.to_json(orient='split')
-                request.session['indi'] = split_indi.to_json(orient='split')
-                request.session['corpo'] = split_corpo.to_json(orient='split')
-                request.session['processing_stats'] = json.loads(json.dumps(processing_stats, default=convert_numpy))
-                request.session['original_filename'] = original_filename
-                request.session['subscriber_alias'] = subscriber_alias
-                # Reorder columns for consumer candidates
-                reordered_consumer_columns = reorder_consumer_columns(split_candidates_consumer.columns)
+                # Create a new FileProcessingTask
+                task = FileProcessingTask.objects.create(
+                    user=request.user,
+                    task_id=f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{request.user.id}",
+                    filename=uploaded_file.name,
+                    subscriber_alias=subscriber_alias,
+                    status='pending'
+                )
                 
-                # Reindex the DataFrame with the new column order
-                split_candidates_consumer = split_candidates_consumer.reindex(columns=reordered_consumer_columns)
+                # Queue the background processing task
+                async_task(
+                    'auto.tasks.process_excel_file_background',
+                    task.id,
+                    file_path,
+                    subscriber_alias,
+                    request.user.id,
+                    task_name=f'Process {uploaded_file.name}'
+                )
                 
-                # Render verification page with all split candidates
-                commercial_records = json.loads(split_candidates_commercial.to_json(orient='records'))
-                consumer_records = json.loads(split_candidates_consumer.to_json(orient='records'))
-                return render(request, 'verify_split.html', {
-                    'form': form,
-                    'commercial_candidates': commercial_records,
-                    'consumer_candidates': consumer_records,
-                    'columns_commercial': list(split_candidates_commercial.columns),
-                    'columns_consumer': reordered_consumer_columns,  # Use the reordered columns
-                    'processing_stats': processing_stats,
-                })
+                # Redirect to task status page
+                return redirect('auto:task_status', task_id=task.task_id)
+                
             except Exception as e:
                 import traceback
                 error_details = traceback.format_exc()
                 return render(request, 'upload.html', {
                     'form': form,
-                    'error_message': f'Error Details:\n{error_details}'
+                    'error_message': f'Error starting background processing: {error_details}'
                 })
-            finally:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
     else:
         form = ExcelUploadForm()
-    return render(request, 'upload.html', {'form': form})
+    
+    # Don't pass recent_tasks to avoid auto-refresh issues
+    # The task widget is commented out in the template anyway
+    return render(request, 'upload.html', {
+        'form': form
+    })
+
+@login_required
+def task_status(request, task_id):
+    """
+    Display the status of a background processing task
+    """
+    task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
+    
+    context = {
+        'task': task,
+        'task_id': task_id,
+    }
+    
+    return render(request, 'task_status.html', context)
+
+@login_required
+def task_status_api(request, task_id):
+    """
+    API endpoint to get task status as JSON for AJAX polling
+    """
+    try:
+        task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
+        
+        response_data = {
+            'status': task.status,
+            'progress': task.progress,
+            'error_message': task.error_message,
+            'result_file_path': task.result_file_path,
+            'created_at': task.created_at.isoformat(),
+            'updated_at': task.updated_at.isoformat(),
+        }
+        
+        # Include intermediate data if task is awaiting verification
+        if task.status == 'awaiting_verification' and task.intermediate_data:
+            response_data['intermediate_data'] = task.intermediate_data
+            
+        return JsonResponse(response_data)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+def cancel_task(request, task_id):
+    """
+    Cancel a pending or processing task
+    """
+    if request.method == 'POST':
+        task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
+        
+        if task.status in ['pending', 'processing']:
+            task.status = 'failed'
+            task.error_message = 'Task cancelled by user'
+            task.save()
+            messages.success(request, f'Task "{task.filename}" has been cancelled.')
+        else:
+            messages.error(request, 'Task cannot be cancelled in its current state.')
+    
+    return redirect('auto:task_dashboard')
+
+@login_required
+def retry_task(request, task_id):
+    """
+    Retry a failed task
+    """
+    if request.method == 'POST':
+        task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
+        
+        if task.status == 'failed':
+            # Reset task status
+            task.status = 'pending'
+            task.progress = 0
+            task.error_message = None
+            task.save()
+            
+            # Re-queue the background processing task
+            file_path = os.path.join(settings.MEDIA_ROOT, task.filename)
+            async_task(
+                'auto.tasks.process_excel_file_background',
+                task.id,
+                file_path,
+                task.subscriber_alias,
+                request.user.id,
+                task_name=f'Retry {task.filename}'
+            )
+            
+            messages.success(request, f'Task "{task.filename}" has been queued for retry.')
+        else:
+            messages.error(request, 'Only failed tasks can be retried.')
+    
+    return redirect('auto:task_dashboard')
+
+@login_required
+def delete_task(request, task_id):
+    """
+    Delete a completed, failed, or awaiting verification task
+    """
+    if request.method == 'POST':
+        task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
+        
+        if task.status in ['completed', 'failed', 'awaiting_verification']:
+            filename = task.filename
+            task.delete()
+            messages.success(request, f'Task "{filename}" has been deleted.')
+        else:
+            messages.error(request, 'Only completed, failed, or awaiting verification tasks can be deleted.')
+    
+    return redirect('auto:task_dashboard')
 
 def clean_for_output(df):
     # Convert all columns to string
@@ -3157,33 +3206,113 @@ def transform_to_consumer(df, columns_to_clear):
 
 @login_required
 @csrf_exempt
-def verify_split_decision(request):
-    if request.method == 'POST':
-        try:
-        # Validate required session keys exist
-            required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer', 'indi', 'corpo']
-            missing_keys = [key for key in required_session_keys if key not in request.session]
-            
-            if missing_keys:
-                messages.error(request, f'Session data missing: {missing_keys}. Please restart the process.')
+def verify_split_decision(request, task_id=None):
+    if request.method == 'GET':
+        # Handle GET request - display verification page
+        # task_id can come from URL parameter or GET parameter (for backward compatibility)
+        if not task_id:
+            task_id = request.GET.get('task_id')
+        
+        # Try to get data from task first (for background processing)
+        if task_id:
+            try:
+                task = FileProcessingTask.objects.get(task_id=task_id)
+                if task.status == 'awaiting_verification' and task.intermediate_data:
+                    # Load data from task intermediate_data
+                    from io import StringIO
+                    intermediate_data = task.intermediate_data
+                    split_candidates_commercial = pd.read_json(StringIO(intermediate_data['split_candidates_commercial']), orient='split', dtype=str)
+                    split_candidates_consumer = pd.read_json(StringIO(intermediate_data['split_candidates_consumer']), orient='split', dtype=str)
+                    
+                    # Store task_id in session for POST processing
+                    request.session['verification_task_id'] = task_id
+                    
+                    # Prepare context for template
+                    context = {
+                        'commercial_candidates': split_candidates_commercial.to_dict('records'),
+                        'consumer_candidates': split_candidates_consumer.to_dict('records'),
+                        'columns_commercial': split_candidates_commercial.columns.tolist(),
+                        'columns_consumer': split_candidates_consumer.columns.tolist(),
+                        'task_id': task_id
+                    }
+                    return render(request, 'verify_split.html', context)
+                else:
+                    messages.error(request, 'Task not ready for verification or data not found.')
+                    return redirect('upload_file')
+            except FileProcessingTask.DoesNotExist:
+                messages.error(request, 'Task not found.')
                 return redirect('upload_file')
+        
+        # Try to get data from session (for regular uploads)
+        required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer']
+        if all(key in request.session for key in required_session_keys):
+            from io import StringIO
+            split_candidates_commercial = pd.read_json(StringIO(request.session['split_candidates_commercial']), orient='split', dtype=str)
+            split_candidates_consumer = pd.read_json(StringIO(request.session['split_candidates_consumer']), orient='split', dtype=str)
+            
+            context = {
+                'commercial_candidates': split_candidates_commercial.to_dict('records'),
+                'consumer_candidates': split_candidates_consumer.to_dict('records'),
+                'columns_commercial': split_candidates_commercial.columns.tolist(),
+                'columns_consumer': split_candidates_consumer.columns.tolist()
+            }
+            return render(request, 'verify_split.html', context)
+        
+        # No data available
+        messages.error(request, 'No verification data available. Please upload a file first.')
+        return redirect('upload_file')
+        
+    elif request.method == 'POST':
+        try:
+            # Check if this is from a background task
+            task_id = request.session.get('verification_task_id')
+            
+            if task_id:
+                # Get data from task intermediate_data
+                from io import StringIO
+                task = FileProcessingTask.objects.get(task_id=task_id)
+                intermediate_data = task.intermediate_data
+                
+                split_candidates_commercial = pd.read_json(StringIO(intermediate_data['split_candidates_commercial']), orient='split', dtype=str)
+                split_candidates_consumer = pd.read_json(StringIO(intermediate_data['split_candidates_consumer']), orient='split', dtype=str)
+                indi = pd.read_json(StringIO(intermediate_data['indi']), orient='split', dtype=str)
+                corpo = pd.read_json(StringIO(intermediate_data['corpo']), orient='split', dtype=str)
+                processing_stats = intermediate_data.get('processing_stats', [])
+                
+                # Get original filename and subscriber from task
+                original_filename = task.filename or 'output'
+                subscriber_alias = task.subscriber_alias or original_filename
+                
+                # Clear the verification task ID from session
+                if 'verification_task_id' in request.session:
+                    del request.session['verification_task_id']
+            else:
+                # Get data from session (regular upload)
+                required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer', 'indi', 'corpo']
+                missing_keys = [key for key in required_session_keys if key not in request.session]
+                
+                if missing_keys:
+                    messages.error(request, f'Session data missing: {missing_keys}. Please restart the process.')
+                    return redirect('upload_file')
+                
+                from io import StringIO
+                split_candidates_commercial = pd.read_json(StringIO(request.session['split_candidates_commercial']), orient='split', dtype=str)
+                split_candidates_consumer = pd.read_json(StringIO(request.session['split_candidates_consumer']), orient='split', dtype=str)
+                indi = pd.read_json(StringIO(request.session['indi']), orient='split', dtype=str)
+                corpo = pd.read_json(StringIO(request.session['corpo']), orient='split', dtype=str)
+                processing_stats = request.session.get('processing_stats', [])
+                original_filename = request.session.get('original_filename', 'output')
+                subscriber_alias = request.session.get('subscriber_alias', original_filename)
             
             # Get user checkbox moves from POST (lists of booleans)
             commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
             consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
             
-            # Retrieve stored data from session
-            split_candidates_commercial = pd.read_json(request.session['split_candidates_commercial'], orient='split', dtype=str)
+            # Apply string enforcement to loaded data
             split_candidates_commercial = enforce_string_columns(split_candidates_commercial)
-            split_candidates_consumer = pd.read_json(request.session['split_candidates_consumer'], orient='split', dtype=str)
             split_candidates_consumer = enforce_string_columns(split_candidates_consumer)
-            indi = pd.read_json(request.session['indi'], orient='split', dtype=str)
             indi = enforce_string_columns(indi)
-            corpo = pd.read_json(request.session['corpo'], orient='split', dtype=str)
             corpo = enforce_string_columns(corpo)
-            processing_stats = request.session.get('processing_stats', [])
-            original_filename = request.session.get('original_filename', 'output')
-            subscriber_alias = request.session.get('subscriber_alias', original_filename)
             
             # Extract date from filename for standardized naming
             extracted_month, extracted_year = extract_date_from_filename(original_filename)
@@ -3230,18 +3359,7 @@ def verify_split_decision(request):
                 corpo = pd.concat([corpo, unchecked_consumer], ignore_index=True)
 
 
-            # When moving an individual to commercial:
-            confirmed_commercial = transform_to_commercial(
-                checked_commercial, 
-                columns_to_clear=guarantor_columns_to_clear
-            )
-
-            # When moving a corporate to consumer:
-            confirmed_consumer = transform_to_consumer(
-                checked_consumer, 
-                columns_to_clear=principal_officer_columns_to_clear
-            )
-# Transform ONLY checked records
+            # Transform ONLY checked records
             confirmed_commercial = pd.DataFrame()
             confirmed_consumer = pd.DataFrame()
             
@@ -3346,6 +3464,16 @@ def verify_split_decision(request):
             indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
             corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
             full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
+            
+            # Update task status to completed if this was from a background task
+            if task_id:
+                try:
+                    task = FileProcessingTask.objects.get(task_id=task_id)
+                    task.status = 'completed'
+                    task.progress = 100
+                    task.save()
+                except FileProcessingTask.DoesNotExist:
+                    pass  # Task might have been deleted
             
             return render(request, 'upload.html', {
                 'form': ExcelUploadForm(),
