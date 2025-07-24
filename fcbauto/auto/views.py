@@ -978,7 +978,7 @@ def replace_ampersands(df):
         # Only process object (string) columns
         if df[column].dtype == 'object':
             df[column] = df[column].apply(
-                lambda x: str(x).replace('&', 'And') if pd.notna(x) else x
+                lambda x: str(x).replace('&', ' And ') if pd.notna(x) else x
             )
     print("Replaced '&' with 'And' across all string columns")
     return df
@@ -2915,7 +2915,7 @@ def upload_file(request):
                 # Queue the background processing task
                 async_task(
                     'auto.tasks.process_excel_file_background',
-                    task.id,
+                    task.task_id,
                     file_path,
                     subscriber_alias,
                     request.user.id,
@@ -3017,7 +3017,7 @@ def retry_task(request, task_id):
             file_path = os.path.join(settings.MEDIA_ROOT, task.filename)
             async_task(
                 'auto.tasks.process_excel_file_background',
-                task.id,
+                task.task_id,
                 file_path,
                 task.subscriber_alias,
                 request.user.id,
@@ -3240,7 +3240,9 @@ def verify_split_decision(request, task_id=None):
                     messages.error(request, 'Task not ready for verification or data not found.')
                     return redirect('upload_file')
             except FileProcessingTask.DoesNotExist:
-                messages.error(request, 'Task not found.')
+                print(f"ERROR: FileProcessingTask with task_id '{task_id}' does not exist in verify_split_decision GET")
+                print(f"Available tasks: {list(FileProcessingTask.objects.values_list('task_id', flat=True))}")
+                messages.error(request, f'Task with ID {task_id} not found.')
                 return redirect('upload_file')
         
         # Try to get data from session (for regular uploads)
@@ -3268,226 +3270,33 @@ def verify_split_decision(request, task_id=None):
             task_id = request.session.get('verification_task_id')
             
             if task_id:
-                # Get data from task intermediate_data
-                from io import StringIO
-                task = FileProcessingTask.objects.get(task_id=task_id)
-                intermediate_data = task.intermediate_data
+                # Get user checkbox moves from POST (lists of booleans)
+                commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
+                consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
                 
-                split_candidates_commercial = pd.read_json(StringIO(intermediate_data['split_candidates_commercial']), orient='split', dtype=str)
-                split_candidates_consumer = pd.read_json(StringIO(intermediate_data['split_candidates_consumer']), orient='split', dtype=str)
-                indi = pd.read_json(StringIO(intermediate_data['indi']), orient='split', dtype=str)
-                corpo = pd.read_json(StringIO(intermediate_data['corpo']), orient='split', dtype=str)
-                processing_stats = intermediate_data.get('processing_stats', [])
+                # Queue the verification processing task for background execution
+                from django_q.tasks import async_task
+                from .tasks import process_verification_decision_background
                 
-                # Get original filename and subscriber from task
-                original_filename = task.filename or 'output'
-                subscriber_alias = task.subscriber_alias or original_filename
+                # Queue the verification processing task
+                async_task(
+                    process_verification_decision_background,
+                    task_id,
+                    commercial_moves,
+                    consumer_moves,
+                    request.user.id
+                )
                 
                 # Clear the verification task ID from session
                 if 'verification_task_id' in request.session:
                     del request.session['verification_task_id']
+                
+                # Redirect to task status page
+                return redirect('auto:task_status', task_id=task_id)
             else:
-                # Get data from session (regular upload)
-                required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer', 'indi', 'corpo']
-                missing_keys = [key for key in required_session_keys if key not in request.session]
-                
-                if missing_keys:
-                    messages.error(request, f'Session data missing: {missing_keys}. Please restart the process.')
-                    return redirect('upload_file')
-                
-                from io import StringIO
-                split_candidates_commercial = pd.read_json(StringIO(request.session['split_candidates_commercial']), orient='split', dtype=str)
-                split_candidates_consumer = pd.read_json(StringIO(request.session['split_candidates_consumer']), orient='split', dtype=str)
-                indi = pd.read_json(StringIO(request.session['indi']), orient='split', dtype=str)
-                corpo = pd.read_json(StringIO(request.session['corpo']), orient='split', dtype=str)
-                processing_stats = request.session.get('processing_stats', [])
-                original_filename = request.session.get('original_filename', 'output')
-                subscriber_alias = request.session.get('subscriber_alias', original_filename)
-            
-            # Get user checkbox moves from POST (lists of booleans)
-            commercial_moves = json.loads(request.POST.get('commercial_moves', '[]'))
-            consumer_moves = json.loads(request.POST.get('consumer_moves', '[]'))
-            
-            # Apply string enforcement to loaded data
-            split_candidates_commercial = enforce_string_columns(split_candidates_commercial)
-            split_candidates_consumer = enforce_string_columns(split_candidates_consumer)
-            indi = enforce_string_columns(indi)
-            corpo = enforce_string_columns(corpo)
-            
-            # Extract date from filename for standardized naming
-            extracted_month, extracted_year = extract_date_from_filename(original_filename)
-
-            # For commercial candidates: checked = move to corpo, unchecked = stay in indi
-            move_to_corp_idx = [i for i, move in enumerate(commercial_moves) if move]
-            stay_in_indi_idx = [i for i, move in enumerate(commercial_moves) if not move]
-
-            # Separate checked vs unchecked commercial candidates
-            checked_commercial = split_candidates_commercial.iloc[move_to_corp_idx].copy() if move_to_corp_idx else pd.DataFrame()
-            unchecked_commercial = split_candidates_commercial.iloc[stay_in_indi_idx].copy() if stay_in_indi_idx else pd.DataFrame()
-
-            # For consumer candidates: checked = move to indi, unchecked = stay in corpo
-            move_to_indi_idx = [i for i, move in enumerate(consumer_moves) if move]
-            stay_in_corp_idx = [i for i, move in enumerate(consumer_moves) if not move]
-
-            # Separate checked vs unchecked consumer candidates
-            checked_consumer = split_candidates_consumer.iloc[move_to_indi_idx].copy() if move_to_indi_idx else pd.DataFrame()
-            unchecked_consumer = split_candidates_consumer.iloc[stay_in_corp_idx].copy() if stay_in_corp_idx else pd.DataFrame()
-
-            # Return unchecked records to original DataFrames (no processing)
-            if not unchecked_commercial.empty:
-                # Restore original individual name structure for unchecked commercial candidates
-                if 'ORIGINAL_BUSINESSNAME' in unchecked_commercial.columns:
-                    # Split the original business name back into individual components
-                    for idx, row in unchecked_commercial.iterrows():
-                        if pd.notna(row['ORIGINAL_BUSINESSNAME']):
-                            # Apply remove_titles function before splitting to clean titles
-                            cleaned_business_name = remove_titles(str(row['ORIGINAL_BUSINESSNAME']))
-                            name_parts = cleaned_business_name.split(maxsplit=2)
-                            unchecked_commercial.at[idx, 'SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
-                            unchecked_commercial.at[idx, 'FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
-                            unchecked_commercial.at[idx, 'MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
-                    # Remove the temporary ORIGINAL_BUSINESSNAME column
-                    unchecked_commercial = unchecked_commercial.drop(columns=['ORIGINAL_BUSINESSNAME'], errors='ignore')
-                indi = pd.concat([indi, unchecked_commercial], ignore_index=True)
-            
-            if not unchecked_consumer.empty:
-                # Restore original business name and clean up individual columns for unchecked consumer records
-                if 'ORIGINAL_BUSINESSNAME' in unchecked_consumer.columns:
-                    unchecked_consumer['BUSINESSNAME'] = unchecked_consumer['ORIGINAL_BUSINESSNAME']
-                    columns_to_drop = ['ORIGINAL_BUSINESSNAME', 'SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
-                    unchecked_consumer = unchecked_consumer.drop(columns=[col for col in columns_to_drop if col in unchecked_consumer.columns], errors='ignore')
-                corpo = pd.concat([corpo, unchecked_consumer], ignore_index=True)
-
-
-            # Transform ONLY checked records
-            confirmed_commercial = pd.DataFrame()
-            confirmed_consumer = pd.DataFrame()
-            
-            if not checked_commercial.empty:
-                # When moving an individual to commercial:
-                confirmed_commercial = transform_to_commercial(
-                    checked_commercial, 
-                    columns_to_clear=guarantor_columns_to_clear
-                )
-                
-            if not checked_consumer.empty:
-                # When moving a corporate to consumer:
-                confirmed_consumer = transform_to_consumer(
-                    checked_consumer, 
-                    columns_to_clear=principal_officer_columns_to_clear
-                )
-                
-            # Concatenate only the transformed checked records
-            if not confirmed_consumer.empty:
-                indi = pd.concat([indi, confirmed_consumer], ignore_index=True)
-            if not confirmed_commercial.empty:
-                corpo = pd.concat([corpo, confirmed_commercial], ignore_index=True)
-
-            # All further processing should NOT change dtypes, but just in case:
-            indi = modify_middle_names(indi)
-            corpo = modify_middle_names(corpo)
-
-            indi = clean_for_output(indi)
-            corpo = clean_for_output(corpo)
-            # Drop name and dependant columns from corpo again to be sure
-            columns_to_remove = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME', 'DEPENDANTS']
-            corpo = corpo.drop(columns=[col for col in columns_to_remove if col in corpo.columns], errors='ignore')
-
-            total_individual_records = len(indi) if not indi.empty else 0
-            total_corporate_records = len(corpo) if not corpo.empty else 0
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Generate standardized filenames using new naming convention
-            indi_output_filename = generate_filename(subscriber_alias, 'excel', 'consumer', extracted_month, extracted_year)
-            corpo_output_filename = generate_filename(subscriber_alias, 'excel', 'commercial', extracted_month, extracted_year)
-            
-            # Use fallback naming if subscriber mapping fails
-            if not indi_output_filename:
-                indi_output_filename = generate_fallback_filename(original_filename, 'excel', 'consumer', timestamp)
-            if not corpo_output_filename:
-                corpo_output_filename = generate_fallback_filename(original_filename, 'excel', 'commercial', timestamp)
-            
-            # For full processed file, use original naming for now (can be updated later if needed)
-            full_output_filename = f"{original_filename}_processed_{timestamp}.xlsx"
-            excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
-            excel_individual_dir = os.path.join(excel_dir, 'individual')
-            excel_corporate_dir = os.path.join(excel_dir, 'corporate')
-            excel_full_dir = os.path.join(excel_dir, 'full')
-            os.makedirs(excel_individual_dir, exist_ok=True)
-            os.makedirs(excel_corporate_dir, exist_ok=True)
-            os.makedirs(excel_full_dir, exist_ok=True)
-
-            fs = FileSystemStorage()
-            
-
-            indi_excel_path = os.path.join(excel_individual_dir, indi_output_filename)
-            indi.to_excel(indi_excel_path, index=False)
-            indi_processed_file_url = fs.url(os.path.join('excel', 'individual', indi_output_filename))
-            corpo_excel_path = os.path.join(excel_corporate_dir, corpo_output_filename)
-            corpo.to_excel(corpo_excel_path, index=False)
-            corpo_processed_file_url = fs.url(os.path.join('excel', 'corporate', corpo_output_filename))
-            full_excel_path = os.path.join(excel_full_dir, full_output_filename)
-            with pd.ExcelWriter(full_excel_path, engine='openpyxl') as writer:
-                indi.to_excel(writer, sheet_name='Merged_Individual_Borrowers', index=False)
-                corpo.to_excel(writer, sheet_name='Merged_Corporate_Borrowers', index=False)
-            full_processed_file_url = fs.url(os.path.join('excel', 'full', full_output_filename))
-            # TXT versions - Generate standardized filenames using new naming convention
-            indi_txt_filename = generate_filename(subscriber_alias, 'txt', 'consumer', extracted_month, extracted_year)
-            corpo_txt_filename = generate_filename(subscriber_alias, 'txt', 'commercial', extracted_month, extracted_year)
-            
-            # Use fallback naming if subscriber mapping fails
-            if not indi_txt_filename:
-                indi_txt_filename = generate_fallback_filename(original_filename, 'txt', 'consumer', timestamp)
-            if not corpo_txt_filename:
-                corpo_txt_filename = generate_fallback_filename(original_filename, 'txt', 'commercial', timestamp)
-            
-            # For full processed file, use original naming for now (can be updated later if needed)
-            full_txt_filename = f"{original_filename}_processed_{timestamp}.txt"
-            txt_dir = os.path.join(settings.MEDIA_ROOT, 'txt')
-            os.makedirs(txt_dir, exist_ok=True)
-            txt_individual_dir = os.path.join(txt_dir, 'individual')
-            txt_corporate_dir = os.path.join(txt_dir, 'corporate')
-            txt_full_dir = os.path.join(txt_dir, 'full')
-            os.makedirs(txt_individual_dir, exist_ok=True)
-            os.makedirs(txt_corporate_dir, exist_ok=True)
-            os.makedirs(txt_full_dir, exist_ok=True)
-            indi_txt_path = os.path.join(txt_individual_dir, indi_txt_filename)
-            indi.to_csv(indi_txt_path, sep='\t', index=False, encoding='utf-8')
-            corpo_txt_path = os.path.join(txt_corporate_dir, corpo_txt_filename)
-            corpo.to_csv(corpo_txt_path, sep='\t', index=False, encoding='utf-8')
-            full_txt_path = os.path.join(txt_full_dir, full_txt_filename)
-            with open(full_txt_path, 'w', encoding='utf-8', newline='\n') as f:
-                indi.to_csv(f, sep='\t', index=False, lineterminator='\n')
-                f.write("\n\n")
-                corpo.to_csv(f, sep='\t', index=False, lineterminator='\n')
-            indi_txt_url = fs.url(os.path.join('txt', 'individual', indi_txt_filename))
-            corpo_txt_url = fs.url(os.path.join('txt', 'corporate', corpo_txt_filename))
-            full_txt_url = fs.url(os.path.join('txt', 'full', full_txt_filename))
-            
-            # Update task status to completed if this was from a background task
-            if task_id:
-                try:
-                    task = FileProcessingTask.objects.get(task_id=task_id)
-                    task.status = 'completed'
-                    task.progress = 100
-                    task.save()
-                except FileProcessingTask.DoesNotExist:
-                    pass  # Task might have been deleted
-            
-            return render(request, 'upload.html', {
-                'form': ExcelUploadForm(),
-                'success_message': 'File processed and merged successfully!',
-                'processing_stats': processing_stats,
-                'total_individual': total_individual_records,
-                'total_corporate': total_corporate_records,
-                'individual_download_url': indi_processed_file_url,
-                'corporate_download_url': corpo_processed_file_url,
-                'full_download_url': full_processed_file_url,
-                'individual_txt_url': indi_txt_url,
-                'corporate_txt_url': corpo_txt_url,
-                'full_txt_url': full_txt_url
-            })
+                # For regular uploads without task_id, redirect to upload page with error
+                messages.error(request, 'No task ID found. Please restart the process.')
+                return redirect('upload_file')
         except Exception as e:
             # This 'except' block will catch any bug or error
         # Log the full error for your own debugging
@@ -3513,4 +3322,47 @@ def clean_and_deduplicate_columns(df):
             new_cols.append(col)
     df.columns = new_cols
     return df
+
+
+def display_results(request, task_id):
+    """
+    Display the results of a completed file processing task.
+    Renders the upload.html template with stored results data.
+    """
+    try:
+        task = FileProcessingTask.objects.get(task_id=task_id, user=request.user)
+        
+        if task.status != 'completed' or not task.results_data:
+            return render(request, 'upload.html', {
+                'form': ExcelUploadForm(),
+                'error_message': 'Task not completed or results not available.'
+            })
+        
+        # Extract results data
+        results = task.results_data
+        
+        return render(request, 'upload.html', {
+            'form': ExcelUploadForm(),
+            'success_message': results.get('success_message', 'File processed successfully!'),
+            'processing_stats': results.get('processing_stats', []),
+            'total_individual': results.get('total_individual', 0),
+            'total_corporate': results.get('total_corporate', 0),
+            'individual_download_url': results.get('individual_download_url', ''),
+            'corporate_download_url': results.get('corporate_download_url', ''),
+            'full_download_url': results.get('full_download_url', ''),
+            'individual_txt_url': results.get('individual_txt_url', ''),
+            'corporate_txt_url': results.get('corporate_txt_url', ''),
+            'full_txt_url': results.get('full_txt_url', '')
+        })
+        
+    except FileProcessingTask.DoesNotExist:
+        return render(request, 'upload.html', {
+            'form': ExcelUploadForm(),
+            'error_message': 'Task not found.'
+        })
+    except Exception as e:
+        return render(request, 'upload.html', {
+            'form': ExcelUploadForm(),
+            'error_message': f'Error displaying results: {str(e)}'
+        })
 

@@ -14,4 +14,5 @@ urlpatterns=[
     path('verify-split/<str:task_id>/', views.verify_split_decision, name='verify_split_task'),
     path('task-status/<str:task_id>/', views.task_status, name='task_status'),
     path('api/task-status/<str:task_id>/', views.task_status_api, name='task_status_api'),
+    path('results/<str:task_id>/', views.display_results, name='display_results'),
 ]

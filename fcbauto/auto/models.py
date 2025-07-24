@@ -7,6 +7,7 @@ class FileProcessingTask(models.Model):
         ('pending', 'Pending'),
         ('processing', 'Processing'),
         ('awaiting_verification', 'Awaiting Verification'),
+        ('finalizing', 'Finalizing'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
     ]
@@ -22,6 +23,7 @@ class FileProcessingTask(models.Model):
     error_message = models.TextField(blank=True, null=True)
     result_file_path = models.CharField(max_length=500, blank=True, null=True)
     intermediate_data = models.JSONField(blank=True, null=True)
+    results_data = models.JSONField(blank=True, null=True)  # Store final processing results
     
     def __str__(self):
         return f"{self.filename} - {self.status}"

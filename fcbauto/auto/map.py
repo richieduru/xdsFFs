@@ -1033,7 +1033,7 @@ Currency_dict = {"NGN": ["naira","n", "ng","ngn"],
 AccountStatus_dict = {
     'Open': ['001', 'open', '01', '1','opened', 'active'],
     'Closed': ['002', 'closed','close', '02', '2'],
-    'Writtenoff': ['003', 'written off', 'written0ff', '03', '3','writenoff','writtenoff']
+    'Writtenoff': ['003', 'written off', 'written0ff', '03', '3','writenoff','writtenoff','writeoff',]
 }
 Loan_dict = {'Commercial Overdraft': ['commercialoverdraft', '1', '01', '001', 'CommercialOverdraft'],
                  'Commercial Credit Card Loan': ['commercialcreditcardloan', '2', '02', '002', 'CommercialCreditCardLoan'],

@@ -155,13 +155,13 @@ Q_CLUSTER = {
     'name': 'fcbauto',
     'workers': 3,
     'recycle': 500,
-    'timeout': 86400,  # 1 hour timeout for large file processing
-    'retry': 86460,  # Retry after timeout + 60 seconds
+    'timeout': 186400,  # 1 hour timeout for large file processing
+    'retry': 186460,  # Retry after timeout + 60 seconds
     'compress': True,
     'save_limit': 250,
     'queue_limit': 50,
     'cpu_affinity': 1,
     'label': 'Django Q',
-    'orm': 'default'  # Use database broker instead of Redis
+    'orm': 'default'
 }
 
