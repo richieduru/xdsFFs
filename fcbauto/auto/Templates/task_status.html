@@ -54,13 +54,23 @@
                                 </div>
                             </div>
                             
-                            <div class="timeline-step {% if task.status == 'awaiting_verification' or task.status == 'completed' %}active{% endif %} {% if task.status == 'completed' %}completed{% endif %}">
+                            <div class="timeline-step {% if task.status == 'awaiting_verification' or task.status == 'finalizing' or task.status == 'completed' %}active{% endif %} {% if task.status == 'finalizing' or task.status == 'completed' %}completed{% endif %}">
                                 <div class="timeline-icon">
                                     <i class="fas fa-user-check"></i>
                                 </div>
                                 <div class="timeline-content">
                                     <h6>Human Verification</h6>
                                     <p class="text-muted mb-0">Manual review of split decisions and data quality</p>
+                                </div>
+                            </div>
+                            
+                            <div class="timeline-step {% if task.status == 'finalizing' or task.status == 'completed' %}active{% endif %} {% if task.status == 'completed' %}completed{% endif %}">
+                                <div class="timeline-icon">
+                                    <i class="fas fa-file-export"></i>
+                                </div>
+                                <div class="timeline-content">
+                                    <h6>Finalization & File Generation</h6>
+                                    <p class="text-muted mb-0">Generating final output files and preparing downloads</p>
                                 </div>
                             </div>
                             
@@ -79,7 +89,7 @@
                     <div class="mb-4">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <strong>Current Status:</strong>
-                            <span id="status-badge" class="badge fs-6 bg-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% elif task.status == 'awaiting_verification' %}info{% else %}secondary{% endif %}">
+                            <span id="status-badge" class="badge fs-6 bg-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% elif task.status == 'finalizing' %}primary{% elif task.status == 'awaiting_verification' %}info{% else %}secondary{% endif %}">
                                 {{ task.get_status_display }}
                             </span>
                         </div>
@@ -423,11 +433,18 @@ function updateTimeline(status) {
             timelineSteps[1].classList.add('completed');
             timelineSteps[2].classList.add('active');
             break;
+        case 'finalizing':
+            timelineSteps[0].classList.add('completed');
+            timelineSteps[1].classList.add('completed');
+            timelineSteps[2].classList.add('completed');
+            timelineSteps[3].classList.add('active');
+            break;
         case 'completed':
             timelineSteps[0].classList.add('completed');
             timelineSteps[1].classList.add('completed');
             timelineSteps[2].classList.add('completed');
-            timelineSteps[3].classList.add('active', 'completed');
+            timelineSteps[3].classList.add('completed');
+            timelineSteps[4].classList.add('active', 'completed');
             break;
         case 'failed':
             // Keep current state but don't advance
@@ -440,6 +457,7 @@ function getStatusDisplay(status) {
         'pending': 'Pending',
         'processing': 'Processing',
         'awaiting_verification': 'Awaiting Verification',
+        'finalizing': 'Finalizing',
         'completed': 'Completed',
         'failed': 'Failed'
     };
@@ -450,7 +468,8 @@ function getStatusClass(status) {
     const classMap = {
         'pending': 'secondary',
         'processing': 'warning',
-        'awaiting_verification': 'warning',
+        'awaiting_verification': 'info',
+        'finalizing': 'primary',
         'completed': 'success',
         'failed': 'danger'
     };
@@ -508,8 +527,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const currentStatus = '{{ task.status }}';
     updateTimeline(currentStatus);
     
-    // Add animation to progress bar if processing
-    if (currentStatus === 'processing') {
+    // Add animation to progress bar if processing or finalizing
+    if (currentStatus === 'processing' || currentStatus === 'finalizing') {
         progressBar.classList.add('progress-bar-animated');
     }
     
@@ -583,6 +602,7 @@ function getStatusDisplay(status) {
         'pending': 'Pending',
         'processing': 'Processing',
         'awaiting_verification': 'Awaiting Verification',
+        'finalizing': 'Finalizing',
         'completed': 'Completed',
         'failed': 'Failed'
     };
@@ -594,6 +614,7 @@ function getStatusClass(status) {
         'pending': 'secondary',
         'processing': 'warning',
         'awaiting_verification': 'info',
+        'finalizing': 'primary',
         'completed': 'success',
         'failed': 'danger'
     };

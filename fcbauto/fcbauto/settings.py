@@ -56,7 +56,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    #'debug_toolbar.middleware.DebugToolbarMiddleware',
+    
 ]
 
 ROOT_URLCONF = 'fcbauto.urls'
@@ -88,13 +88,26 @@ WSGI_APPLICATION = 'fcbauto.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'mssql',
+        'NAME': 'dbexcel',
+        'HOST': 'DURU',
+        'PORT': '',
+        'OPTIONS': {
+            'driver': 'ODBC Driver 17 for SQL Server',
+            'Trusted_connection': 'yes',
+            'use_legacy_datetime': True,
+        },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -155,8 +168,8 @@ Q_CLUSTER = {
     'name': 'fcbauto',
     'workers': 3,
     'recycle': 500,
-    'timeout': 186400,  # 1 hour timeout for large file processing
-    'retry': 186460,  # Retry after timeout + 60 seconds
+    'timeout': 186400, 
+    'retry': 186460,  
     'compress': True,
     'save_limit': 250,
     'queue_limit': 50,

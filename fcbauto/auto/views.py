@@ -470,7 +470,7 @@ def convert_date(date_string):
 
         
 def process_dates(df):
-    """Process date fields in the DataFrame"""
+    """Process date fields in the DataFrame with optimized vectorized operations"""
     date_columns = [
         'DATEOFBIRTH',
         'DATEOFINCORPORATION',
@@ -489,14 +489,26 @@ def process_dates(df):
     for col in df.columns:
         # Check if column name contains 'date' (case insensitive)
         if 'date' in col.lower() or col in date_columns:
-            print(f"Processing date column: {col}")  # Debug print
             try:
-                df[col] = df[col].apply(convert_date)
-                # Print sample of converted dates
-                print(f"Sample of converted dates for {col}:")
-                print(df[col].head())
+                # First, try pandas built-in datetime parsing (handles 90% of cases)
+                parsed_dates = pd.to_datetime(df[col], errors='coerce')
+                
+                # Convert successfully parsed dates to YYYYMMDD format
+                df[col] = parsed_dates.dt.strftime('%Y%m%d')
+                
+                # Only use custom convert_date for failed conversions (NaT values)
+                failed_mask = parsed_dates.isna() & df[col].notna() & (df[col].astype(str).str.strip() != '')
+                if failed_mask.any():
+                    # Apply custom conversion only to failed cases
+                    original_values = df.loc[failed_mask, col].copy()
+                    df.loc[failed_mask, col] = original_values.apply(convert_date)
+                
+                # Replace NaT/None with empty string for consistency
+                df[col] = df[col].fillna('')
+                
             except Exception as e:
-                print(f"Error processing dates in column {col}: {str(e)}")
+                # Fallback to original method if vectorized approach fails
+                df[col] = df[col].apply(convert_date)
     
     return df
 
@@ -3349,10 +3361,9 @@ def display_results(request, task_id):
             'total_corporate': results.get('total_corporate', 0),
             'individual_download_url': results.get('individual_download_url', ''),
             'corporate_download_url': results.get('corporate_download_url', ''),
-            'full_download_url': results.get('full_download_url', ''),
             'individual_txt_url': results.get('individual_txt_url', ''),
-            'corporate_txt_url': results.get('corporate_txt_url', ''),
-            'full_txt_url': results.get('full_txt_url', '')
+            'corporate_txt_url': results.get('corporate_txt_url', '')
+            # Full file URLs removed as part of optimization
         })
         
     except FileProcessingTask.DoesNotExist:
