@@ -242,6 +242,31 @@
   .btn-download-txt:hover { background-color: #f8f9fa; }
   .btn-upload-new { background-color: #f8f9fa; border: 1px solid #dee2e6; color: #212529; font-weight: 500; padding: 0.6rem 1.5rem; border-radius: 6px; text-decoration: none; }
   
+  /* Task Widget Collapsible Styling */
+  .task-widget-container .card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+  
+  .task-widget-container .card-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    padding: 0.75rem 1rem;
+  }
+  
+  .task-widget-container .card-header:hover {
+    background-color: #e9ecef;
+  }
+  
+  .task-widget-container .card-header i.fa-chevron-down {
+    transition: transform 0.3s ease;
+  }
+  
+  .task-widget-container .card-header[aria-expanded="true"] i.fa-chevron-down {
+    transform: rotate(180deg);
+  }
+  
 </style>
 {% endblock %}
 
@@ -263,7 +288,7 @@
             {% csrf_token %}
             {{ form.non_field_errors }}
             
-            <div class="drag-drop-area" onclick="document.getElementById('id_file').click()">
+            <div class="drag-drop-area">
                 <div id="upload-prompt">
                     <div class="drag-drop-icon"><i class="fas fa-cloud-upload-alt"></i></div>
                     <div class="file-upload-text"><strong>Choose File</strong> or drag and drop</div>
@@ -288,6 +313,25 @@
                 </span>
             </button>
         </form>
+    </div>
+    {% endif %}
+
+    <!-- Task Widget - Only show on upload page and make it collapsible -->
+    {% if not success_message %}
+    <div class="task-widget-container mt-4">
+        <div class="card">
+            <div class="card-header" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#taskWidgetCollapse" aria-expanded="false" aria-controls="taskWidgetCollapse">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="fas fa-tasks me-2"></i>Recent Tasks</h6>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div class="collapse" id="taskWidgetCollapse">
+                <div class="card-body p-0">
+                    <!-- {% include 'auto/task_widget.html' %} -->
+                </div>
+            </div>
+        </div>
     </div>
     {% endif %}
 
@@ -349,7 +393,7 @@
                 <div class="download-buttons">
                     <a href="{{ individual_download_url }}" class="btn-download individual" download>Individual Borrowers</a>
                     <a href="{{ corporate_download_url }}" class="btn-download corporate" download>Corporate Borrowers</a>
-                    <a href="{{ full_download_url }}" class="btn-download full" download>Full Processed File</a>
+                    <!-- Full file download removed as part of optimization -->
                 </div>
             </div>
             <div class="download-category">
@@ -357,7 +401,7 @@
               <div class="download-buttons">
                   <a href="{{ individual_txt_url }}" class="btn-download individual" download>Individual (TXT)</a>
                   <a href="{{ corporate_txt_url }}" class="btn-download corporate" download>Corporate (TXT)</a>
-                  <a href="{{ full_txt_url }}" class="btn-download full" download>Full Processed (TXT)</a>
+                  <!-- Full TXT file download removed as part of optimization -->
               </div>
            </div>
         </div>
@@ -400,6 +444,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         fileInput.onchange = updateFileDisplay;
 
+        // Add click handler for drag-drop area
+        if (dragDropArea) {
+            dragDropArea.addEventListener('click', function() {
+                fileInput.click();
+            });
+        }
+
         if (dragDropArea) {
             ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
                 dragDropArea.addEventListener(eventName, e => {
@@ -424,47 +475,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (uploadForm && uploadButton) {
         uploadForm.addEventListener('submit', function(e) {
-            // 1. Prevent the default form submission which reloads the page
-            e.preventDefault();
-
-            // 2. Check if a file is actually selected
+            // Check if a file is actually selected
             if (!fileInput.files || fileInput.files.length === 0) {
+                e.preventDefault();
                 alert('Please choose a file to upload.');
                 return;
             }
 
-            // 3. Show the loading animation
+            // Show the loading animation
             uploadButton.classList.add('is-loading');
             uploadButton.disabled = true;
-
-            // 4. Create FormData to send the file and CSRF token
-            const formData = new FormData(uploadForm);
-
-            // 5. Use the Fetch API to send data asynchronously
-            fetch(uploadForm.action, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    // The CSRF token is already in formData, but it's good practice
-                    // for some JS frameworks to also send it in the header.
-                    'X-CSRFToken': formData.get('csrfmiddlewaretoken'),
-                }
-            })
-            .then(response => response.text()) // Get the server's response as HTML text
-            .then(html => {
-                // 6. Replace the entire page content with the new HTML from the server
-                document.open();
-                document.write(html);
-                document.close();
-            })
-            .catch(error => {
-                // 7. Handle network errors
-                console.error('Upload Error:', error);
-                alert('An error occurred during the upload. Please try again.');
-                // Revert the button to its original state on error
-                uploadButton.classList.remove('is-loading');
-                uploadButton.disabled = false;
-            });
+            
+            // Let the form submit normally - don't prevent default
+            // The server will handle the redirect after processing
         });
     }
 });

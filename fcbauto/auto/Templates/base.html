@@ -61,6 +61,22 @@
             <div class="ms-auto d-flex align-items-center">
                 <ul class="navbar-nav flex-row">
                     {% if user.is_authenticated %}
+                    <li class="nav-item">
+                        <a href="{% url 'auto:upload' %}" class="nav-link">
+                            <i class="fas fa-upload me-1"></i>Upload
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{% url 'auto:task_dashboard' %}" class="nav-link position-relative">
+                            <i class="fas fa-tasks me-1"></i>My Tasks
+                            {% comment %}
+                            <!-- Future enhancement: Add notification badge for tasks awaiting verification -->
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.6rem; display: none;">
+                                0
+                            </span>
+                            {% endcomment %}
+                        </a>
+                    </li>
                     {% if user.is_staff or user.is_superuser %}
                     <li class="nav-item">
                         <a href="{% url 'admin:index' %}" class="nav-link">
