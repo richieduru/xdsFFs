@@ -25,6 +25,31 @@ from .models import FileProcessingTask
 
 
 
+def normalize_null_like_strings(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize common null-like string tokens to empty string on object columns.
+
+    - Trims whitespace on strings
+    - Replaces case-insensitive exact tokens like: na, n/a, nan, none, null, nil,
+      unknown, blank, missing, not available, not applicable
+    - Only affects object dtype columns, preserving numeric types and leading zeros
+    """
+    if df is None or df.empty:
+        return df
+
+    obj_cols = [c for c in df.columns if df[c].dtype == object]
+    if not obj_cols:
+        return df
+
+    df[obj_cols] = df[obj_cols].applymap(lambda v: v.strip() if isinstance(v, str) else v)
+
+    null_like_regex = re.compile(r'^(?:n/?a|na|nan|none|null|nil|unknown|blank|missing|not\s+available|not\s+applicable)$', re.IGNORECASE)
+
+    df[obj_cols] = df[obj_cols].applymap(
+        lambda v: '' if isinstance(v, str) and null_like_regex.match(v) else v
+    )
+
+    return df
+
 def extract_subscriber_alias_from_filename(filename):
     """
     Extract subscriber alias from filename by removing date patterns
@@ -490,20 +515,31 @@ def process_dates(df):
         # Check if column name contains 'date' (case insensitive)
         if 'date' in col.lower() or col in date_columns:
             try:
-                # First, try pandas built-in datetime parsing (handles 90% of cases)
-                parsed_dates = pd.to_datetime(df[col], errors='coerce')
-                
-                # Convert successfully parsed dates to YYYYMMDD format
+                # Preserve original values for fallback handling
+                original_values_full = df[col].copy()
+
+                # Parse entire column as strings to leverage fast vectorized parsing
+                # Casting to string avoids pandas treating integers as Unix ns timestamps
+                as_str = original_values_full.astype(str).str.strip()
+
+                # Identify numeric-only candidates (likely Excel serials) to route to convert_date()
+                numeric_mask = as_str.str.fullmatch(r'-?\d+(\.\d+)?').fillna(False)
+
+                # Vectorized parse without specifying formats; many common formats will parse fast
+                parsed_dates = pd.to_datetime(as_str, errors='coerce')
+
+                # Force numeric-only rows to fallback so Excel serials are handled correctly
+                parsed_dates.loc[numeric_mask] = pd.NaT
+
+                # Write successes in YYYYMMDD
                 df[col] = parsed_dates.dt.strftime('%Y%m%d')
-                
-                # Only use custom convert_date for failed conversions (NaT values)
-                failed_mask = parsed_dates.isna() & df[col].notna() & (df[col].astype(str).str.strip() != '')
+
+                # Fallback with convert_date() only for truly failed, non-empty originals
+                failed_mask = parsed_dates.isna() & as_str.ne('')
                 if failed_mask.any():
-                    # Apply custom conversion only to failed cases
-                    original_values = df.loc[failed_mask, col].copy()
-                    df.loc[failed_mask, col] = original_values.apply(convert_date)
-                
-                # Replace NaT/None with empty string for consistency
+                    df.loc[failed_mask, col] = original_values_full.loc[failed_mask].apply(convert_date)
+
+                # Normalize empties
                 df[col] = df[col].fillna('')
                 
             except Exception as e:
@@ -563,17 +599,14 @@ def process_names(df):
     
     for group_name, name_columns in name_groups.items():
         if all(col in df.columns for col in name_columns):
-            # Debug print
-            print(f"\nProcessing group: {group_name}")
-            print("Original columns:", df[name_columns].head())
+            # Processing name group
             
             # Explicitly clean columns
             for col in name_columns:
                 # Convert to string, replace NaN with empty string
                 df[col] = df[col].apply(lambda x: '' if x is None or (isinstance(x, float) and pd.isna(x)) else str(x).strip())
             
-            # Print after initial cleaning
-            print("After initial cleaning:", df[name_columns].head())
+            # Initial cleaning completed
             
             # Remove titles and clean names while preserving special characters
             for col in name_columns:
@@ -596,8 +629,7 @@ def process_names(df):
             temp_full_name = f'FULL_NAME_{group_name}'
             df[temp_full_name] = df.apply(combine_names, axis=1)
             
-            # Print combined names
-            print("Combined names:", df[temp_full_name].head())
+            # Names combined
             
             # Split the full name back into components
             name_parts = df[temp_full_name].apply(lambda x: pd.Series(x.split(maxsplit=2) + ['', '', ''])[:3])
@@ -607,8 +639,7 @@ def process_names(df):
             df[name_columns[1]] = name_parts[1]
             df[name_columns[2]] = name_parts[2]
             
-            # Print final processed columns
-            print("Final processed columns:", df[name_columns].head())
+            # Name processing completed
             
             # Drop the temporary column
             df = df.drop(temp_full_name, axis=1)
@@ -1914,6 +1945,9 @@ def try_convert_to_float(x):
     if date_pattern.match(x):
         return ''  # It's a date string, so clear it.
     
+    if re.search(r'[a-zA-Z]', x):
+        return ''
+    
     # Remove specific special characters and leading/extra spaces
     x = re.sub(r'[-?]', '', x)  # Remove specific special characters
     x = re.sub(r'\s+', ' ', x)  # Replace multiple spaces with a single space
@@ -2090,7 +2124,6 @@ def merge_individual_borrowers(consu, credit, guar):
     # Merge with guarantor information
     merge_attempted = False
     try:
-        print("Attempting primary merge with ACCOUNTNUMBER")
         temp_merge = pd.merge(
             indi,
             guar,
@@ -2100,9 +2133,6 @@ def merge_individual_borrowers(consu, credit, guar):
             indicator=True
         )
         merge_attempted = True
-        print(f"Guarantor merge on ACCOUNTNUMBER shape: {temp_merge.shape}")
-        print("Merge indicator counts:")
-        print(temp_merge['_merge'].value_counts())
         
         # Check if we need fallback merge
         if temp_merge['_merge'].eq('left_only').all():
@@ -2328,10 +2358,10 @@ def is_commercial_entity(name, commercial_keywords):
     
     # Debug print for analysis
     if commercial_matches:
-        print(f"Potential commercial entity detected: {name}")
-        print(f"Matched standalone keywords: {commercial_matches}")
+        # print(f"Potential commercial entity detected: {name}")
+        # print(f"Matched standalone keywords: {commercial_matches}")
     
-    return len(commercial_matches) > 0
+        return len(commercial_matches) > 0
 
 def split_commercial_entities(indi):
     # Create a DataFrame to store commercial entities/
@@ -2375,6 +2405,51 @@ def split_commercial_entities(indi):
         corpo2 = corpo2.where(pd.notnull(corpo2), '')
     
     return indi, corpo2
+
+def split_commercial_entities_with_indices(indi):
+    """Enhanced version that returns original indices for proper record tracking"""
+    # Create a DataFrame to store commercial entities
+    corpo2 = pd.DataFrame(columns=indi.columns)
+    
+    # Rows to remove from individual borrowers and their original indices
+    rows_to_remove = []
+    original_indices = []
+    
+    # Iterate through individual borrowers to find commercial entities
+    for index, row in indi.iterrows():
+        # Combine name columns for checking
+        name_columns = ['SURNAME', 'FIRSTNAME', 'MIDDLENAME']
+        full_name = ' '.join([str(row[col]).lower() for col in name_columns if pd.notna(row[col])])
+        
+        # Check if the name is a commercial entity
+        if is_commercial_entity(full_name, commercial_keywords):
+            # Prepare the row for commercial entities
+            commercial_row = row.copy()
+            
+            # Store the original combined name for potential reverting
+            original_combined_name = f"{row['SURNAME']} {row['FIRSTNAME']} {row['MIDDLENAME']}".strip()
+            commercial_row['ORIGINAL_BUSINESSNAME'] = original_combined_name
+            
+            # Combine names into SURNAME, drop other name columns
+            commercial_row['SURNAME'] = original_combined_name
+            # Set DATA column to 'D'
+            commercial_row['DATA'] = 'D'
+            # Append to commercial entities
+            corpo2 = pd.concat([corpo2, pd.DataFrame([commercial_row])], ignore_index=True)
+            rows_to_remove.append(index)
+            original_indices.append(index)  # Track original index
+    
+    # Remove identified commercial entities from individual borrowers
+    indi = indi.drop(rows_to_remove).reset_index(drop=True)
+    
+    # After creation, ensure DATA column exists and is filled, and replace None with ''
+    if not corpo2.empty:
+        if 'DATA' not in corpo2.columns:
+            corpo2['DATA'] = 'D'
+        corpo2['DATA'] = corpo2['DATA'].fillna('D')
+        corpo2 = corpo2.where(pd.notnull(corpo2), '')
+    
+    return indi, corpo2, original_indices
 
 def is_consumer_entity(name, commercial_keywords, threshold=90):
     """
@@ -2448,6 +2523,59 @@ def split_consumer_entities(corpo):
 
     return corpo, indi2
 
+def split_consumer_entities_with_indices(corpo):
+    """
+    Enhanced version that returns original indices for proper record tracking
+    """
+    if 'BUSINESSNAME' not in corpo.columns:
+        return corpo, pd.DataFrame(), []
+        
+    indi2 = pd.DataFrame()
+    rows_to_remove = []
+    original_indices = []
+    
+    for index, row in corpo.iterrows():
+        if pd.isna(row['BUSINESSNAME']):
+            continue
+        
+        business_name = str(row['BUSINESSNAME']).strip()
+        
+        if is_consumer_entity(business_name, commercial_keywords):
+            consumer_data = row.to_dict()
+            
+            # Store the original name for records that might be sent back
+            consumer_data['ORIGINAL_BUSINESSNAME'] = business_name
+            
+            # Apply remove_titles function before splitting to clean titles
+            cleaned_business_name = remove_titles(business_name)
+            
+            # Split the cleaned business name into a max of 3 parts
+            name_parts = cleaned_business_name.split(maxsplit=2)
+            
+            # Assign name parts correctly
+            consumer_data['SURNAME'] = name_parts[0] if len(name_parts) > 0 else ''
+            consumer_data['FIRSTNAME'] = name_parts[1] if len(name_parts) > 1 else ''
+            consumer_data['MIDDLENAME'] = name_parts[2] if len(name_parts) > 2 else ''
+            consumer_data['DEPENDANTS'] = '00'
+            consumer_data['DATA'] = 'D'
+
+            # Remove the original BUSINESSNAME key to avoid conflicts
+            if 'BUSINESSNAME' in consumer_data:
+                del consumer_data['BUSINESSNAME']
+
+            temp_df = pd.DataFrame([consumer_data])
+            indi2 = pd.concat([indi2, temp_df], ignore_index=True)
+            rows_to_remove.append(index)
+            original_indices.append(index)  # Track original index
+            
+    if not corpo.empty and rows_to_remove:
+        corpo = corpo.drop(rows_to_remove).reset_index(drop=True)
+    
+    if not indi2.empty:
+        indi2 = indi2.where(pd.notnull(indi2), '')
+
+    return corpo, indi2, original_indices
+
 def merge_dataframes(processed_sheets):
     """
     Main merging function with sequential processing
@@ -2467,9 +2595,9 @@ def merge_dataframes(processed_sheets):
         indi = processed_sheets.get('individualborrowertemplate', pd.DataFrame())
         corpo = processed_sheets.get('corporateborrowertemplate', pd.DataFrame())
         
-        # Apply null value cleaning
-        indi = indi.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
-        corpo = corpo.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
+        # Apply standardized null-like string normalization
+        indi = normalize_null_like_strings(indi)
+        corpo = normalize_null_like_strings(corpo)
         
         print("\n=== MERGED SHEET DATA (Before Split) ===")
         print("Individual records:", len(indi))
@@ -2509,9 +2637,9 @@ def merge_dataframes(processed_sheets):
                             corpo = pd.concat([corpo[common_columns], corpo2[common_columns]], ignore_index=True)
                         print(f"  - Total corporate records after concatenation: {len(corpo)}")
                 except Exception as e:
-                    print(f"Error during commercial concatenation: {e}")
-                    print(f"corpo columns: {list(corpo.columns)}")
-                    print(f"corpo2 columns: {list(corpo2.columns)}")
+                    # print(f"Error during commercial concatenation: {e}")
+                    # print(f"corpo columns: {list(corpo.columns)}")
+                    # print(f"corpo2 columns: {list(corpo2.columns)}")
                     # If concatenation fails, at least ensure corpo2 is preserved
                     if corpo.empty:
                         corpo = corpo2.copy()
@@ -2529,29 +2657,34 @@ def merge_dataframes(processed_sheets):
                 print("\nRenaming columns for extracted consumer entities...")
                 # Apply the CommToConsu mapping to rename columns and strictly order them
                 indi2 = rename_columns(indi2, CommToConsu.copy())
+                # Normalize tokens in extracted dataframe
+                indi2 = normalize_null_like_strings(indi2)
                 
                 # Ensure both dataframes have reset indexes
                 indi = indi.reset_index(drop=True)
                 indi2 = indi2.reset_index(drop=True)
                 
-                print("\nConcatenating extracted consumer entities with individual data...")
+                # print("\nConcatenating extracted consumer entities with individual data...")
                 try:
                     # If indi is empty, just use indi2
                     if indi.empty:
                         indi = indi2
-                        print(f"  - Using extracted consumer entities as individual data: {len(indi)} rows")
+                        # print(f"  - Using extracted consumer entities as individual data: {len(indi)} rows")
                     else:
                         # Ensure both dataframes have the same column ordering by applying the same mapping
                         indi = rename_columns(indi, CommToConsu.copy())
                         indi2 = rename_columns(indi2, CommToConsu.copy())
+                        # Normalize both before concatenation
+                        indi = normalize_null_like_strings(indi)
+                        indi2 = normalize_null_like_strings(indi2)
                         
                         # Direct concatenation without filtering to common columns
                         indi = pd.concat([indi, indi2], ignore_index=True, sort=False)
-                        print(f"Total individual borrowers after concatenation: {len(indi)}")
+                        # print(f"Total individual borrowers after concatenation: {len(indi)}")
                 except Exception as e:
-                    print(f"Error during consumer concatenation: {str(e)}")
-                    print(f"indi columns: {list(indi.columns)}")
-                    print(f"indi2 columns: {list(indi2.columns)}")
+                    # print(f"Error during consumer concatenation: {str(e)}")
+                    # print(f"indi columns: {list(indi.columns)}")
+                    # print(f"indi2 columns: {list(indi2.columns)}")
                     # If concatenation fails, at least ensure indi2 is preserved
                     if indi.empty:
                         indi = indi2.copy()
@@ -2579,8 +2712,8 @@ def merge_dataframes(processed_sheets):
     print("\n=== MERGED CORPORATE BORROWERS ===")
     print(corpo.head()) 
 
-    indi = indi.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
-    corpo = corpo.applymap(lambda x: None if str(x).strip().lower() in ['none', 'nan', 'null', 'nill', 'nil'] else x)
+    indi = normalize_null_like_strings(indi)
+    corpo = normalize_null_like_strings(corpo)
     
     #Step 3: Split commercial entities from individual borrowers
     indi, corpo2 = split_commercial_entities(indi)
@@ -2605,11 +2738,13 @@ def merge_dataframes(processed_sheets):
     if not corpo2.empty:
         # Rename corpo2 columns to match corporate borrower template
         corpo2 = rename_columns(corpo2, ConsuToComm.copy())
+        # Normalize tokens before concatenation
+        corpo2 = normalize_null_like_strings(corpo2)
         
         # Debug statement to show corpo2 details before concatenation
-        print("Number of commercial entities:", len(corpo2))
-        print("First few rows of corpo2:")
-        print(corpo2.head())
+        # print("Number of commercial entities:", len(corpo2))
+        # print("First few rows of corpo2:")
+        # print(corpo2.head())
         
         # Ensure both dataframes have reset indexes
         corpo = corpo.reset_index(drop=True)
@@ -2626,12 +2761,14 @@ def merge_dataframes(processed_sheets):
                 corpo2 = rename_columns(corpo2, ConsuToComm.copy())
                 
                 # Direct concatenation without filtering to common columns
+                corpo = normalize_null_like_strings(corpo)
+                corpo2 = normalize_null_like_strings(corpo2)
                 corpo = pd.concat([corpo, corpo2], ignore_index=True, sort=False)
                 print(f"Total corporate borrowers after concatenation: {len(corpo)}")
         except Exception as e:
-            print(f"Error during commercial concatenation: {e}")
-            print(f"corpo columns: {list(corpo.columns)}")
-            print(f"corpo2 columns: {list(corpo2.columns)}")
+            # print(f"Error during commercial concatenation: {e}")
+            # print(f"corpo columns: {list(corpo.columns)}")
+            # print(f"corpo2 columns: {list(corpo2.columns)}")
             # If concatenation fails, at least ensure corpo2 is preserved
             if corpo.empty:
                 corpo = corpo2.copy()
@@ -2698,8 +2835,7 @@ def merge_dataframes(processed_sheets):
             print(indi.head())
         except Exception as e:
             print(f"Error during consumer concatenation: {str(e)}")
-            print(f"indi columns: {list(indi.columns)}")
-            print(f"indi2 columns: {list(indi2.columns)}")
+            # Consumer entity extraction completed
             # If concatenation fails, at least ensure indi2 is preserved
             if indi.empty:
                 indi = indi2.copy()
@@ -2722,20 +2858,16 @@ def rename_columns(df, column_mapping):
         # Create a fresh copy of the dataframe to avoid modifying the original
         df = df.copy()
         
-        # Print original columns before renaming
-        print("Original columns before renaming:", list(df.columns))
-        print("Mapping dictionary has", len(column_mapping), "keys")
-
         # Rename columns that match the mapping
+        renamed_count = 0
         for column in list(df.columns):  # Use list() to create a copy of columns
             for mapped_column, alt_names in column_mapping.items():
                 if column in alt_names or column.lower() in alt_names or column.upper() in alt_names:
                     df.rename(columns={column: mapped_column}, inplace=True)
-                    print(f"Renamed {column} to {mapped_column}")
+                    renamed_count += 1
                     break
         
-        # Print columns after initial renaming
-        print("Columns after renaming:", list(df.columns))
+        print(f"Renamed {renamed_count} columns using mapping dictionary")
 
         # Check for duplicate columns and make them unique
         if len(df.columns) != len(set(df.columns)):
@@ -2758,33 +2890,20 @@ def rename_columns(df, column_mapping):
             # Assign the new unique column names
             df.columns = new_columns
         
-        # Print columns before final reordering
-        print("Columns before reordering:", list(df.columns))
-
-        # Create ordered DataFrame using concat instead of adding columns one by one
-        # This avoids DataFrame fragmentation warning
-        column_dfs = []
+        # Create ordered DataFrame by selecting/creating columns in the correct order
+        ordered_data = {}
         for col in column_mapping.keys():
             if col in df.columns:
                 # For existing columns, use the values from the original DataFrame
-                column_dfs.append(pd.DataFrame({col: df[col]}))
+                ordered_data[col] = df[col].values
             else:
-                # For missing columns, create a new DataFrame with None values
-                column_dfs.append(pd.DataFrame({col: [None] * len(df)}))
+                # For missing columns, create None values with the same length as df
+                ordered_data[col] = [None] * len(df)
         
-        # Use concat to join all columns at once
-        if column_dfs:
-            ordered_df = pd.concat(column_dfs, axis=1)
-        else:
-            # If no columns were found, create an empty DataFrame with the right columns
-            ordered_df = pd.DataFrame(columns=list(column_mapping.keys()))
+        # Create the ordered DataFrame directly from the dictionary
+        ordered_df = pd.DataFrame(ordered_data, index=df.index)
         
-        # Reset index to ensure clean index for concatenation
-        ordered_df = ordered_df.reset_index(drop=True)
-        
-        # Print final columns
-        print("Final columns after strict reordering:", list(ordered_df.columns))
-        print(f"Final dataframe has {len(ordered_df.columns)} columns and {len(ordered_df)} rows")
+        print(f"Column reordering completed: {len(ordered_df.columns)} columns, {len(ordered_df)} rows")
 
         return ordered_df
     except Exception as e:
@@ -2794,7 +2913,7 @@ def rename_columns(df, column_mapping):
 
 
 def modify_middle_names(df):
-    """Keep only the first name in the specified middle name columns."""
+    """Keep only the first name in the specified middle name columns, removing standalone 'and'."""
     middle_name_columns = [
         'MIDDLENAME',
         'SPOUSEMIDDLENAME',
@@ -2805,9 +2924,13 @@ def modify_middle_names(df):
     
     for col in middle_name_columns:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: str(x).split()[0] if pd.notna(x) and str(x).strip() else '')
+            df[col] = df[col].apply(lambda x: (
+                str(x).split()[0] if pd.notna(x) and str(x).strip() and str(x).split()[0].lower() != 'and' else ''
+            ) if pd.notna(x) and str(x).strip() else '')
     
     return df
+
+
 def trim_strings_to_59(df):
     """
     Trim all string values in the DataFrame to 59 characters maximum
@@ -2826,7 +2949,7 @@ def trim_strings_to_59(df):
     
     # Apply the function to all elements in the DataFrame
     print("\n=== TRIMMING STRING VALUES TO 59 CHARACTERS ===")
-    df = df.applymap(trim_string)
+    df = df.map(trim_string)
     print("String trimming completed")
     
     return df
@@ -2967,11 +3090,14 @@ def task_status(request, task_id):
     
     return render(request, 'task_status.html', context)
 
-@login_required
 def task_status_api(request, task_id):
     """
     API endpoint to get task status as JSON for AJAX polling
     """
+    # Handle authentication manually to return JSON instead of HTML redirect
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Authentication required'}, status=401)
+    
     try:
         task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
         
@@ -3001,6 +3127,13 @@ def cancel_task(request, task_id):
         task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
         
         if task.status in ['pending', 'processing']:
+            # Clean up any associated files before cancelling
+            from .tasks import cleanup_all_task_files
+            try:
+                cleanup_all_task_files(task)
+            except Exception as e:
+                print(f"Warning: Failed to clean up files for cancelled task {task.task_id}: {e}")
+            
             task.status = 'failed'
             task.error_message = 'Task cancelled by user'
             task.save()
@@ -3045,17 +3178,25 @@ def retry_task(request, task_id):
 @login_required
 def delete_task(request, task_id):
     """
-    Delete a completed, failed, or awaiting verification task
+    Delete a completed, failed, awaiting verification, or finalizing task
     """
     if request.method == 'POST':
         task = get_object_or_404(FileProcessingTask, task_id=task_id, user=request.user)
         
-        if task.status in ['completed', 'failed', 'awaiting_verification']:
+        if task.status in ['completed', 'failed', 'awaiting_verification', 'finalizing']:
             filename = task.filename
+            
+            # Clean up all associated files before deleting the task
+            from .tasks import cleanup_all_task_files
+            try:
+                cleanup_all_task_files(task)
+            except Exception as e:
+                print(f"Warning: Failed to clean up files for deleted task {task.task_id}: {e}")
+            
             task.delete()
             messages.success(request, f'Task "{filename}" has been deleted.')
         else:
-            messages.error(request, 'Only completed, failed, or awaiting verification tasks can be deleted.')
+            messages.error(request, 'Only completed, failed, awaiting verification, or finalizing tasks can be deleted.')
     
     return redirect('auto:task_dashboard')
 
@@ -3233,8 +3374,19 @@ def verify_split_decision(request, task_id=None):
                     # Load data from task intermediate_data
                     from io import StringIO
                     intermediate_data = task.intermediate_data
-                    split_candidates_commercial = pd.read_json(StringIO(intermediate_data['split_candidates_commercial']), orient='split', dtype=str)
-                    split_candidates_consumer = pd.read_json(StringIO(intermediate_data['split_candidates_consumer']), orient='split', dtype=str)
+                    storage_type = intermediate_data.get('storage_type', 'json')
+                    
+                    if storage_type == 'json':
+                        # Traditional JSON storage for smaller data
+                        split_candidates_commercial = pd.read_json(StringIO(intermediate_data['split_candidates_commercial']), orient='split', dtype=str)
+                        split_candidates_consumer = pd.read_json(StringIO(intermediate_data['split_candidates_consumer']), orient='split', dtype=str)
+                    elif storage_type == 'chunked_files':
+                        # For large data, redirect to chunked verification
+                        messages.info(request, 'This dataset is large and requires chunked verification.')
+                        return redirect('auto:verification_chunked', task_id=task_id)
+                    else:
+                        messages.error(request, 'Unknown storage type in task data.')
+                        return redirect('auto:upload')
                     
                     # Store task_id in session for POST processing
                     request.session['verification_task_id'] = task_id
@@ -3261,8 +3413,8 @@ def verify_split_decision(request, task_id=None):
         required_session_keys = ['split_candidates_commercial', 'split_candidates_consumer']
         if all(key in request.session for key in required_session_keys):
             from io import StringIO
-            split_candidates_commercial = pd.read_json(StringIO(request.session['split_candidates_commercial']), orient='split', dtype=str)
-            split_candidates_consumer = pd.read_json(StringIO(request.session['split_candidates_consumer']), orient='split', dtype=str)
+            split_candidates_commercial = pd.read_json(StringIO(request.session['split_candidates_commercial']), orient='split', dtype=object)
+            split_candidates_consumer = pd.read_json(StringIO(request.session['split_candidates_consumer']), orient='split', dtype=object)
             
             context = {
                 'commercial_candidates': split_candidates_commercial.to_dict('records'),
@@ -3320,6 +3472,261 @@ def verify_split_decision(request, task_id=None):
     else:
         return render(request, 'upload.html', {'form': ExcelUploadForm(), 'error_message': 'Invalid request.'})
 
+# Chunked Verification Views
+@login_required
+def verification_page_chunked(request, task_id):
+    """Main chunked verification page with pagination"""
+    try:
+        task = FileProcessingTask.objects.get(task_id=task_id, user=request.user)
+        
+        if task.status != 'awaiting_verification':
+            messages.error(request, 'Task is not ready for verification.')
+            return redirect('auto:task_status', task_id=task_id)
+        
+        # Check if using chunked storage
+        intermediate_data = task.intermediate_data
+        storage_type = intermediate_data.get('storage_type', 'json')
+        if storage_type != 'chunked_files':
+            # Redirect to regular verification for non-chunked data
+            return redirect('auto:verify_split_task', task_id=task_id)
+        
+        # Calculate total pages
+        file_references = intermediate_data.get('file_references', {})
+        total_commercial_pages = calculate_total_verification_pages(
+            file_references.get('commercial_candidates', [])
+        )
+        total_consumer_pages = calculate_total_verification_pages(
+            file_references.get('consumer_candidates', [])
+        )
+        
+        context = {
+            'task_id': task_id,
+            'total_commercial_pages': total_commercial_pages,
+            'total_consumer_pages': total_consumer_pages,
+            'verification_page_size': 500,  # From plan10.md
+        }
+        
+        return render(request, 'verification_chunked.html', context)
+        
+    except FileProcessingTask.DoesNotExist:
+        messages.error(request, 'Task not found.')
+        return redirect('auto:upload')
+    except Exception as e:
+        messages.error(request, f'Error loading verification page: {str(e)}')
+        return redirect('auto:task_status', task_id=task_id)
+
+@login_required
+def load_verification_chunk(request, task_id):
+    """AJAX endpoint to load a specific chunk of verification data"""
+    try:
+        task = FileProcessingTask.objects.get(task_id=task_id, user=request.user)
+        
+        chunk_type = request.GET.get('type')  # 'commercial' or 'consumer'
+        page = int(request.GET.get('page', 1))
+        
+        if chunk_type not in ['commercial', 'consumer']:
+            return JsonResponse({'error': 'Invalid chunk type'}, status=400)
+        
+        # Load chunk data from files
+        intermediate_data = task.intermediate_data
+        file_references = intermediate_data.get('file_references', {})
+        chunk_filenames = file_references.get(f'{chunk_type}_candidates', [])
+        
+        if not chunk_filenames:
+            return JsonResponse({
+                'data': [],
+                'columns': [],
+                'total_records': 0,
+                'current_page': page,
+                'total_pages': 0
+            })
+        
+        # Calculate which chunk file contains this page
+        records_per_chunk = 10000  # From CHUNK_SIZE in tasks.py
+        records_per_page = 500     # From VERIFICATION_PAGE_SIZE
+        
+        start_record = (page - 1) * records_per_page
+        chunk_index = start_record // records_per_chunk
+        record_offset = start_record % records_per_chunk
+        
+        # Check if chunk index is valid
+        if chunk_index >= len(chunk_filenames):
+            return JsonResponse({
+                'data': [],
+                'columns': [],
+                'total_records': 0,
+                'current_page': page,
+                'total_pages': 0
+            })
+        
+        # Load the appropriate chunk file
+        chunk_filename = chunk_filenames[chunk_index]
+        from django.conf import settings
+        import os
+        temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_processing')
+        chunk_path = os.path.join(temp_dir, chunk_filename)
+        
+        if not os.path.exists(chunk_path):
+            return JsonResponse({'error': f'Chunk file not found: {chunk_filename}'}, status=404)
+        
+        # Read chunk from file
+        import pandas as pd
+        df_chunk = pd.read_parquet(chunk_path)
+        
+        # Extract the page data from the chunk
+        end_record = min(record_offset + records_per_page, len(df_chunk))
+        page_data = df_chunk.iloc[record_offset:end_record]
+        
+        # Calculate total records and pages
+        total_records = 0
+        for filename in chunk_filenames:
+            file_path = os.path.join(temp_dir, filename)
+            if os.path.exists(file_path):
+                chunk_df = pd.read_parquet(file_path)
+                total_records += len(chunk_df)
+        total_pages = (total_records + records_per_page - 1) // records_per_page
+        
+        return JsonResponse({
+            'data': page_data.to_dict('records'),
+            'columns': page_data.columns.tolist(),
+            'total_records': total_records,
+            'current_page': page,
+            'total_pages': total_pages
+        })
+        
+    except FileProcessingTask.DoesNotExist:
+        return JsonResponse({'error': 'Task not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+def calculate_total_verification_pages(chunk_filenames):
+    """Calculate total pages for verification chunks"""
+    if not chunk_filenames:
+        return 0
+    
+    try:
+        import pandas as pd
+        import os
+        from django.conf import settings
+        
+        temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_processing')
+        total_records = 0
+        
+        for filename in chunk_filenames:
+            file_path = os.path.join(temp_dir, filename)
+            if os.path.exists(file_path):
+                chunk_df = pd.read_parquet(file_path)
+                total_records += len(chunk_df)
+        
+        records_per_page = 500  # VERIFICATION_PAGE_SIZE
+        return (total_records + records_per_page - 1) // records_per_page
+    except Exception:
+        return 0
+
+@csrf_exempt
+@login_required
+def process_verification_chunk(request, task_id):
+    """AJAX endpoint to process verification decisions for a chunk"""
+    print(f"\n=== PROCESS VERIFICATION CHUNK DEBUG ===")
+    print(f"Request method: {request.method}")
+    print(f"Task ID: {task_id}")
+    
+    if request.method != 'POST':
+        print("ERROR: Method not allowed")
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+    try:
+        print(f"Looking for task with ID: {task_id} for user: {request.user}")
+        task = FileProcessingTask.objects.get(task_id=task_id, user=request.user)
+        print(f"Task found: {task}")
+        
+        print(f"Request body: {request.body}")
+        data = json.loads(request.body)
+        print(f"Parsed data: {data}")
+        
+        chunk_type = data.get('type')  # 'commercial' or 'consumer'
+        page = data.get('page')
+        decisions = data.get('decisions', {})  # {index: action}
+        
+        print(f"Chunk type: {chunk_type}")
+        print(f"Page: {page}")
+        print(f"Decisions: {decisions}")
+        print(f"Number of decisions: {len(decisions)}")
+        
+        # Store decisions in task's intermediate_data
+        intermediate_data = task.intermediate_data
+        print(f"Current intermediate_data keys: {list(intermediate_data.keys()) if intermediate_data else 'None'}")
+        
+        # Ensure intermediate_data is not None
+        if intermediate_data is None:
+            print("WARNING: intermediate_data is None, initializing...")
+            intermediate_data = {}
+            task.intermediate_data = intermediate_data
+        
+        # Ensure verification_state exists and is properly structured
+        if 'verification_state' not in intermediate_data or intermediate_data['verification_state'] is None:
+            print("Creating new verification_state")
+            intermediate_data['verification_state'] = {
+                'processed_pages': {},
+                'processed_decisions': {}
+            }
+        else:
+            print(f"Existing verification_state: {intermediate_data['verification_state']}")
+            # Ensure the verification_state has the required keys
+            if 'processed_pages' not in intermediate_data['verification_state']:
+                print("Adding missing processed_pages key")
+                intermediate_data['verification_state']['processed_pages'] = {}
+            if 'processed_decisions' not in intermediate_data['verification_state']:
+                print("Adding missing processed_decisions key")
+                intermediate_data['verification_state']['processed_decisions'] = {}
+        
+        # Store page decisions
+        decision_key = f'{chunk_type}_page_{page}'
+        print(f"Decision key: {decision_key}")
+        
+        intermediate_data['verification_state']['processed_pages'][decision_key] = True
+        intermediate_data['verification_state']['processed_decisions'][decision_key] = decisions
+        
+        print(f"Updated verification_state: {intermediate_data['verification_state']}")
+        
+        # Save updated intermediate_data
+        task.intermediate_data = intermediate_data
+        task.save()
+        print(f"Task saved successfully")
+        
+        print(f"=== END PROCESS VERIFICATION CHUNK DEBUG ===\n")
+        return JsonResponse({'success': True})
+        
+    except FileProcessingTask.DoesNotExist:
+        print(f"ERROR: Task not found for ID: {task_id}")
+        return JsonResponse({'error': 'Task not found'}, status=404)
+    except Exception as e:
+        print(f"ERROR in process_verification_chunk: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+def finalize_chunked_verification(request, task_id):
+    """Finalize chunked verification and start final processing"""
+    try:
+        task = FileProcessingTask.objects.get(task_id=task_id, user=request.user)
+        
+        # Queue the chunked verification finalization task
+        from django_q.tasks import async_task
+        
+        async_task('auto.tasks.finalize_chunked_verification', task_id)
+        
+        messages.success(request, 'Verification completed. Processing final results...')
+        return redirect('auto:task_status', task_id=task_id)
+        
+    except FileProcessingTask.DoesNotExist:
+        messages.error(request, 'Task not found.')
+        return redirect('auto:upload')
+    except Exception as e:
+        messages.error(request, f'Error finalizing verification: {str(e)}')
+        return redirect('auto:task_status', task_id=task_id)
+
 def clean_and_deduplicate_columns(df):
     """Clean column names and assign suffixes to duplicates after cleaning."""
     cleaned_cols = [remove_special_characters(str(col)).upper().strip() for col in df.columns]
@@ -3376,4 +3783,3 @@ def display_results(request, task_id):
             'form': ExcelUploadForm(),
             'error_message': f'Error displaying results: {str(e)}'
         })
-

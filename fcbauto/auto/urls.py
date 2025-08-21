@@ -15,4 +15,9 @@ urlpatterns=[
     path('task-status/<str:task_id>/', views.task_status, name='task_status'),
     path('api/task-status/<str:task_id>/', views.task_status_api, name='task_status_api'),
     path('results/<str:task_id>/', views.display_results, name='display_results'),
+    # Chunked verification URLs
+    path('verification-chunked/<str:task_id>/', views.verification_page_chunked, name='verification_chunked'),
+    path('load-verification-chunk/<str:task_id>/', views.load_verification_chunk, name='load_verification_chunk'),
+    path('process-verification-chunk/<str:task_id>/', views.process_verification_chunk, name='process_verification_chunk'),
+    path('finalize-chunked-verification/<str:task_id>/', views.finalize_chunked_verification, name='finalize_chunked_verification'),
 ]

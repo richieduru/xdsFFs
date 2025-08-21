@@ -1,0 +1,600 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chunked Verification</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+
+    <style>
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            background: linear-gradient(to bottom, #e7f5ff, #ffffff);
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        .main-content {
+            padding: 2rem;
+            height: 100vh;
+            overflow: hidden;
+            margin-bottom: 80px;
+        }
+
+        .page-header {
+            margin-bottom: 2rem;
+        }
+
+        .page-header h2 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin: 0;
+            color: #343a40;
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            margin-bottom: 1.5rem;
+            max-height: calc(100vh - 200px);
+            overflow: hidden;
+        }
+
+        .table-container {
+            max-height: calc(100vh - 350px);
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        .table {
+            width: 25% !important;
+            min-width: 400px;
+        }
+
+        .table th,
+        .table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 150px;
+        }
+
+        .verification-actions {
+            background-color: #fff;
+            padding: 1rem 2rem;
+            border-top: 1px solid #dee2e6;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100vw;
+            z-index: 1000;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .chunk-tabs {
+            margin-bottom: 1rem;
+        }
+
+        .chunk-tabs .nav-link {
+            color: #495057;
+            border: 1px solid #dee2e6;
+            border-bottom: none;
+        }
+
+        .chunk-tabs .nav-link.active {
+            background-color: #fff;
+            border-color: #dee2e6 #dee2e6 #fff;
+            color: #495057;
+        }
+
+        .verification-summary {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="main-content">
+    <div class="page-header">
+        <h2>Chunked Manual Verification</h2>
+        <p class="text-muted">Review and verify records in manageable chunks (500 records per page)</p>
+    </div>
+
+    <div class="verification-summary">
+        <div class="row">
+            <div class="col-md-6">
+                <strong>Commercial Candidates:</strong> <span id="commercial-total">Loading...</span> records
+                (<span id="commercial-pages">{{ total_commercial_pages|default:0 }}</span> pages)
+            </div>
+            <div class="col-md-6">
+                <strong>Consumer Candidates:</strong> <span id="consumer-total">Loading...</span> records
+                (<span id="consumer-pages">{{ total_consumer_pages|default:0 }}</span> pages)
+            </div>
+        </div>
+        <div class="mt-2">
+            <strong>Progress:</strong> <span id="progress-text">0 of 0 pages processed</span>
+            <div class="progress mt-1" style="height: 6px;">
+                <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chunk Type Tabs -->
+    <ul class="nav nav-tabs chunk-tabs" id="chunkTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="commercial-tab" data-bs-toggle="tab" data-bs-target="#commercial-pane" 
+                    type="button" role="tab" aria-controls="commercial-pane" aria-selected="true">
+                <i class="fas fa-building me-2"></i>Commercial Candidates
+                <span class="badge bg-secondary ms-2" id="commercial-badge">{{ total_commercial_pages|default:0 }}</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="consumer-tab" data-bs-toggle="tab" data-bs-target="#consumer-pane" 
+                    type="button" role="tab" aria-controls="consumer-pane" aria-selected="false">
+                <i class="fas fa-user me-2"></i>Consumer Candidates
+                <span class="badge bg-secondary ms-2" id="consumer-badge">{{ total_consumer_pages|default:0 }}</span>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="chunkTabContent">
+        <!-- Commercial Tab -->
+        <div class="tab-pane fade show active" id="commercial-pane" role="tabpanel" aria-labelledby="commercial-tab">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Commercial Candidates - Page <span id="commercial-current-page">1</span></h5>
+                    <div class="pagination-controls">
+                        <button class="btn btn-sm btn-outline-secondary" id="commercial-prev" disabled>
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </button>
+                        <span class="mx-2">Page <span id="commercial-page-display">1</span> of <span id="commercial-total-pages">{{ total_commercial_pages|default:0 }}</span></span>
+                        <button class="btn btn-sm btn-outline-secondary" id="commercial-next">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <div class="loading-spinner" id="commercial-loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading commercial candidates...</p>
+                    </div>
+                    <table class="table table-hover mb-0" id="commercial-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">
+                                    <input type="checkbox" id="select-all-commercial" class="form-check-input" title="Select All" />
+                                </th>
+                                <!-- Columns will be populated dynamically -->
+                            </tr>
+                        </thead>
+                        <tbody id="commercial-tbody">
+                            <!-- Data will be populated via AJAX -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consumer Tab -->
+        <div class="tab-pane fade" id="consumer-pane" role="tabpanel" aria-labelledby="consumer-tab">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Consumer Candidates - Page <span id="consumer-current-page">1</span></h5>
+                    <div class="pagination-controls">
+                        <button class="btn btn-sm btn-outline-secondary" id="consumer-prev" disabled>
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </button>
+                        <span class="mx-2">Page <span id="consumer-page-display">1</span> of <span id="consumer-total-pages">{{ total_consumer_pages|default:0 }}</span></span>
+                        <button class="btn btn-sm btn-outline-secondary" id="consumer-next">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <div class="loading-spinner" id="consumer-loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Loading consumer candidates...</p>
+                    </div>
+                    <table class="table table-hover mb-0" id="consumer-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">
+                                    <input type="checkbox" id="select-all-consumer" class="form-check-input" title="Select All" />
+                                </th>
+                                <!-- Columns will be populated dynamically -->
+                            </tr>
+                        </thead>
+                        <tbody id="consumer-tbody">
+                            <!-- Data will be populated via AJAX -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="verification-actions">
+    <div class="d-flex align-items-center gap-3">
+        <div class="fw-bold">
+            Selected: <span id="selected-count">0</span>
+        </div>
+        <button type="button" id="save-page-btn" class="btn btn-outline-primary">
+            <i class="fas fa-save me-1"></i> Save Current Page
+        </button>
+    </div>
+    <button type="button" id="finalize-verification-btn" class="btn btn-success">
+        <i class="fas fa-check me-1"></i> Complete Verification
+    </button>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const TASK_ID = '{{ task_id|default:"" }}';
+let currentChunkType = 'commercial';
+let currentPages = {
+    commercial: 1,
+    consumer: 1
+};
+let totalPages = {
+    commercial: parseInt('{{ total_commercial_pages|default:"0" }}') || 0,
+    consumer: parseInt('{{ total_consumer_pages|default:"0" }}') || 0
+};
+let pageDecisions = {
+    commercial: {},
+    consumer: {}
+};
+let processedPages = new Set();
+
+// Initialize page
+$(document).ready(function() {
+    loadChunk('commercial', 1);
+    updateProgress();
+    
+    // Tab switching
+    $('#chunkTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+        const target = $(e.target).attr('data-bs-target');
+        currentChunkType = target.includes('commercial') ? 'commercial' : 'consumer';
+        const page = currentPages[currentChunkType];
+        loadChunk(currentChunkType, page);
+    });
+    
+    // Pagination controls
+    $('#commercial-prev, #consumer-prev').on('click', function() {
+        const type = $(this).attr('id').includes('commercial') ? 'commercial' : 'consumer';
+        if (currentPages[type] > 1) {
+            saveCurrentPageDecisions();
+            currentPages[type]--;
+            loadChunk(type, currentPages[type]);
+        }
+    });
+    
+    $('#commercial-next, #consumer-next').on('click', function() {
+        const type = $(this).attr('id').includes('commercial') ? 'commercial' : 'consumer';
+        if (currentPages[type] < totalPages[type]) {
+            saveCurrentPageDecisions();
+            currentPages[type]++;
+            loadChunk(type, currentPages[type]);
+        }
+    });
+    
+    // Select all functionality
+    $(document).on('change', '#select-all-commercial, #select-all-consumer', function() {
+        const type = $(this).attr('id').includes('commercial') ? 'commercial' : 'consumer';
+        const checked = $(this).is(':checked');
+        $(`#${type}-tbody input[type="checkbox"]`).prop('checked', checked);
+        updateSelectedCount();
+    });
+    
+    // Individual checkbox changes
+    $(document).on('change', 'tbody input[type="checkbox"]', function() {
+        const isChecked = $(this).is(':checked');
+        const index = $(this).data('index');
+        console.log('Checkbox changed - Index:', index, 'Checked:', isChecked);
+        updateSelectedCount();
+        updateSelectAllState();
+    });
+    
+    // Save page button
+    $('#save-page-btn').on('click', function() {
+        console.log('Save page button clicked!');
+        saveCurrentPageDecisions();
+    });
+    
+    // Finalize verification button
+    $('#finalize-verification-btn').on('click', function() {
+        finalizeVerification();
+    });
+});
+
+function loadChunk(type, page) {
+    console.log('=== LOAD CHUNK DEBUG ===');
+    console.log('Loading chunk - Type:', type, 'Page:', page);
+    
+    // Show loading spinner
+    $(`#${type}-loading`).show();
+    $(`#${type}-table`).hide();
+    
+    // Update pagination controls
+    updatePaginationControls(type, page);
+    
+    $.ajax({
+        url: `/load-verification-chunk/${TASK_ID}/`,
+        method: 'GET',
+        data: {
+            type: type,
+            page: page
+        },
+        success: function(response) {
+            console.log('Chunk loaded successfully:', response);
+            populateTable(type, response);
+            $(`#${type}-loading`).hide();
+            $(`#${type}-table`).show();
+            
+            // Load saved decisions for this page AFTER table is populated
+            console.log('Loading saved decisions for page:', page);
+            loadPageDecisions(type, page);
+            updateSelectedCount();
+            updateSelectAllState();
+            console.log('=== END LOAD CHUNK DEBUG ===');
+        },
+        error: function(xhr, status, error) {
+            console.error('Error loading chunk:', error);
+            console.error('Response:', xhr.responseText);
+            $(`#${type}-loading`).hide();
+            showToast('Error loading data. Please try again.', 'error');
+        }
+    });
+}
+
+function populateTable(type, response) {
+    const table = $(`#${type}-table`);
+    const thead = table.find('thead tr');
+    const tbody = table.find('tbody');
+    
+    // Clear existing content
+    thead.find('th:not(:first)').remove();
+    tbody.empty();
+    
+    // Populate headers
+    response.columns.forEach(col => {
+        thead.append(`<th>${col}</th>`);
+    });
+    
+    // Populate data
+    response.data.forEach((row, index) => {
+        let tr = `<tr><td class="text-center">
+            <input type="checkbox" class="form-check-input" data-index="${index}" value="1">
+        </td>`;
+        
+        response.columns.forEach(col => {
+            const value = row[col] || '';
+            tr += `<td title="${value}">${value}</td>`;
+        });
+        
+        tr += '</tr>';
+        tbody.append(tr);
+    });
+    
+    // Update totals
+    $(`#${type}-total`).text(response.total_records);
+    $(`#${type}-pages`).text(response.total_pages);
+    totalPages[type] = response.total_pages;
+}
+
+function updatePaginationControls(type, page) {
+    // Update page displays
+    $(`#${type}-current-page`).text(page);
+    $(`#${type}-page-display`).text(page);
+    $(`#${type}-total-pages`).text(totalPages[type]);
+    
+    // Update button states
+    $(`#${type}-prev`).prop('disabled', page <= 1);
+    $(`#${type}-next`).prop('disabled', page >= totalPages[type]);
+}
+
+function saveCurrentPageDecisions() {
+    const type = currentChunkType;
+    const page = currentPages[type];
+    const decisions = {};
+    
+    console.log('=== SAVE CURRENT PAGE DEBUG ===');
+    console.log('Current chunk type:', type);
+    console.log('Current page:', page);
+    console.log('Task ID:', TASK_ID);
+    
+    const checkedBoxes = $(`#${type}-tbody input[type="checkbox"]:checked`);
+    console.log('Number of checked boxes found:', checkedBoxes.length);
+    
+    checkedBoxes.each(function() {
+        const index = $(this).data('index');
+        decisions[index] = 'move';
+        console.log('Adding decision for index:', index);
+    });
+    
+    console.log('Final decisions object:', decisions);
+    console.log('Number of decisions:', Object.keys(decisions).length);
+    
+    // Store decisions locally
+    if (!pageDecisions[type][page]) {
+        pageDecisions[type][page] = {};
+    }
+    pageDecisions[type][page] = decisions;
+    
+    console.log('Stored in pageDecisions:', pageDecisions[type][page]);
+    
+    // Check for CSRF token
+    const csrfToken = $('[name=csrfmiddlewaretoken]').val();
+    console.log('CSRF Token found:', csrfToken ? 'Yes' : 'No');
+    
+    const ajaxData = {
+        type: type,
+        page: page,
+        decisions: decisions
+    };
+    console.log('AJAX data being sent:', ajaxData);
+    
+    // Send to server
+    $.ajax({
+        url: `/process-verification-chunk/${TASK_ID}/`,
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken
+        },
+        data: JSON.stringify(ajaxData),
+        contentType: 'application/json',
+        beforeSend: function() {
+            console.log('AJAX request starting...');
+        },
+        success: function(response) {
+            console.log('AJAX success response:', response);
+            processedPages.add(`${type}_${page}`);
+            updateProgress();
+            showToast('Page decisions saved successfully!');
+        },
+        error: function(xhr, status, error) {
+            console.error('AJAX Error Details:');
+            console.error('Status:', status);
+            console.error('Error:', error);
+            console.error('Response Text:', xhr.responseText);
+            console.error('Status Code:', xhr.status);
+            showToast('Error saving decisions. Please try again.', 'error');
+        }
+    });
+    
+    console.log('=== END SAVE CURRENT PAGE DEBUG ===');
+}
+
+function loadPageDecisions(type, page) {
+    console.log('=== LOAD PAGE DECISIONS DEBUG ===');
+    console.log('Type:', type, 'Page:', page);
+    
+    const decisions = pageDecisions[type][page] || {};
+    console.log('Decisions for this page:', decisions);
+    console.log('Number of decisions:', Object.keys(decisions).length);
+    
+    // Clear all checkboxes first
+    const checkboxes = $(`#${type}-tbody input[type="checkbox"]`);
+    console.log('Found checkboxes:', checkboxes.length);
+    checkboxes.prop('checked', false);
+    
+    // Apply saved decisions
+    let appliedCount = 0;
+    Object.keys(decisions).forEach(index => {
+        const checkbox = $(`#${type}-tbody input[data-index="${index}"]`);
+        if (checkbox.length > 0) {
+            checkbox.prop('checked', true);
+            appliedCount++;
+            console.log('Applied decision for index:', index);
+        } else {
+            console.log('WARNING: Checkbox not found for index:', index);
+        }
+    });
+    
+    console.log('Applied', appliedCount, 'decisions out of', Object.keys(decisions).length);
+    console.log('=== END LOAD PAGE DECISIONS DEBUG ===');
+}
+
+function updateSelectedCount() {
+    const count = $('tbody input[type="checkbox"]:checked').length;
+    $('#selected-count').text(count);
+}
+
+function updateSelectAllState() {
+    const type = currentChunkType;
+    const checkboxes = $(`#${type}-tbody input[type="checkbox"]`);
+    const checkedBoxes = $(`#${type}-tbody input[type="checkbox"]:checked`);
+    
+    const selectAll = $(`#select-all-${type}`);
+    
+    if (checkedBoxes.length === 0) {
+        selectAll.prop('indeterminate', false);
+        selectAll.prop('checked', false);
+    } else if (checkedBoxes.length === checkboxes.length) {
+        selectAll.prop('indeterminate', false);
+        selectAll.prop('checked', true);
+    } else {
+        selectAll.prop('indeterminate', true);
+    }
+}
+
+function updateProgress() {
+    const totalPagesCount = totalPages.commercial + totalPages.consumer;
+    const processedCount = processedPages.size;
+    const percentage = totalPagesCount > 0 ? (processedCount / totalPagesCount) * 100 : 0;
+    
+    $('#progress-text').text(`${processedCount} of ${totalPagesCount} pages processed`);
+    $('#progress-bar').css('width', `${percentage}%`);
+}
+
+function finalizeVerification() {
+    // Save current page first
+    saveCurrentPageDecisions();
+    
+    // Show confirmation
+    if (!confirm('Are you sure you want to complete the verification process? This will finalize all decisions and start processing the final results.')) {
+        return;
+    }
+    
+    // Disable button and show loading
+    const btn = $('#finalize-verification-btn');
+    btn.prop('disabled', true)
+       .html('<span class="spinner-border spinner-border-sm me-2"></span>Finalizing...');
+    
+    // Redirect to finalization endpoint
+    window.location.href = `/finalize-chunked-verification/${TASK_ID}/`;
+}
+
+function showToast(message, type = 'success') {
+    // Simple toast notification
+    const alertClass = type === 'error' ? 'alert-danger' : 'alert-success';
+    const toast = $(`
+        <div class="alert ${alertClass} alert-dismissible fade show position-fixed" 
+             style="top: 20px; right: 20px; z-index: 9999; min-width: 300px;">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `);
+    
+    $('body').append(toast);
+    
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+        toast.alert('close');
+    }, 3000);
+}
+</script>
+
+</body>
+</html>

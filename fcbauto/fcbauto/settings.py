@@ -14,6 +14,8 @@ from pathlib import Path
 import os
 
 
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -99,7 +101,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'mssql',
         'NAME': 'dbexcel',
-        'HOST': 'DURU',
+        'HOST': 'O2JUNE\\SQLEXPRESS',
         'PORT': '',
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
@@ -174,7 +176,6 @@ Q_CLUSTER = {
     'save_limit': 250,
     'queue_limit': 50,
     'cpu_affinity': 1,
-    'label': 'Django Q',
-    'orm': 'default'
+    'label': 'Django Q2',
+    'orm': 'default',
 }
-

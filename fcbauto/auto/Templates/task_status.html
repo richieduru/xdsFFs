@@ -133,7 +133,7 @@
                                 </div>
                                 
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-start">
-                                    <a href="{% url 'auto:verify_split_decision' %}?task_id={{ task.task_id }}" class="btn btn-warning btn-lg">
+                                    <a href="#" id="verification-btn" class="btn btn-warning btn-lg" onclick="startVerification('{{ task.task_id }}')">
                                         <i class="fas fa-user-check me-2"></i> Start Verification Process
                                     </a>
                                     <button class="btn btn-outline-secondary" onclick="refreshStatus()">
@@ -375,7 +375,14 @@ function updateStatus(data) {
         progressBar.classList.remove('progress-bar-animated');
     }
     
-    // Update timeline based on status
+    // Track verification completion for timeline updates
+    if (data.status === 'awaiting_verification') {
+        verificationCompleted = false;
+    } else if (data.status === 'finalizing' || data.status === 'completed') {
+        verificationCompleted = true;
+    }
+    
+    // Update timeline
     updateTimeline(data.status);
     
     // Handle error messages
@@ -411,8 +418,18 @@ function updateStatus(data) {
     }
 }
 
+// Track if verification has been completed to handle post-verification processing correctly
+let verificationCompleted = false;
+
 function updateTimeline(status) {
     const timelineSteps = document.querySelectorAll('.timeline-step');
+    
+    // Track verification completion
+    if (status === 'awaiting_verification') {
+        verificationCompleted = false;
+    } else if (status === 'finalizing' || status === 'completed') {
+        verificationCompleted = true;
+    }
     
     // Reset all steps
     timelineSteps.forEach(step => {
@@ -426,7 +443,15 @@ function updateTimeline(status) {
             break;
         case 'processing':
             timelineSteps[0].classList.add('completed');
-            timelineSteps[1].classList.add('active');
+            // If verification was completed, this is post-verification processing
+            // so skip to finalization step instead of data processing
+            if (verificationCompleted) {
+                timelineSteps[1].classList.add('completed');
+                timelineSteps[2].classList.add('completed');
+                timelineSteps[3].classList.add('active');
+            } else {
+                timelineSteps[1].classList.add('active');
+            }
             break;
         case 'awaiting_verification':
             timelineSteps[0].classList.add('completed');
@@ -538,6 +563,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 window.addEventListener('beforeunload', stopPolling);
+
+// Handle verification routing based on data type
+function startVerification(taskId) {
+    // Fetch task details to check if chunked verification is needed
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.intermediate_data && data.intermediate_data.is_chunked) {
+                // Redirect to chunked verification
+                window.location.href = `{% url 'auto:verification_chunked' 'TASK_ID' %}`.replace('TASK_ID', taskId);
+            } else {
+                // Redirect to regular verification
+                window.location.href = `{% url 'auto:verify_split_decision' %}?task_id=${taskId}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error checking verification type:', error);
+            // Fallback to regular verification
+            window.location.href = `{% url 'auto:verify_split_decision' %}?task_id=${taskId}`;
+        });
+}
 </script>
 
 <!-- <script>
@@ -682,8 +733,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const initialProgress = progressBar.getAttribute('data-progress');
     progressBar.style.width = initialProgress + '%';
     
+    // Initialize verification completion flag based on current status
+    const currentStatus = '{{ task.status }}';
+    if (currentStatus === 'finalizing' || currentStatus === 'completed') {
+        verificationCompleted = true;
+    }
+    
+    // Update timeline with current status
+    updateTimeline(currentStatus);
+    
     // Only start polling if task is not completed or failed
-    const currentStatus = '{{ task.task_id }}';
     if (currentStatus !== 'completed' && currentStatus !== 'failed') {
         startPolling();
     }
@@ -691,5 +750,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Stop polling when page is unloaded
 window.addEventListener('beforeunload', stopPolling);
+
+// Handle verification routing based on data type
+function startVerification(taskId) {
+    // Fetch task details to check if chunked verification is needed
+    fetch(`/api/task-status/${taskId}/`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.intermediate_data && data.intermediate_data.is_chunked) {
+                // Redirect to chunked verification
+                window.location.href = `/verification-chunked/${taskId}/`;
+            } else {
+                // Redirect to regular verification
+                window.location.href = `/verify-split/?task_id=${taskId}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error checking verification type:', error);
+            // Fallback to regular verification
+            window.location.href = `/verify-split/?task_id=${taskId}`;
+        });
+}
 </script> -->
 {% endblock %}

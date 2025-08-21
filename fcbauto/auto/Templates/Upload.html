@@ -317,23 +317,7 @@
     {% endif %}
 
     <!-- Task Widget - Only show on upload page and make it collapsible -->
-    {% if not success_message %}
-    <div class="task-widget-container mt-4">
-        <div class="card">
-            <div class="card-header" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#taskWidgetCollapse" aria-expanded="false" aria-controls="taskWidgetCollapse">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0"><i class="fas fa-tasks me-2"></i>Recent Tasks</h6>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="taskWidgetCollapse">
-                <div class="card-body p-0">
-                    <!-- {% include 'auto/task_widget.html' %} -->
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
+
 
     {% if success_message %}
     <div class="results-wrapper">
